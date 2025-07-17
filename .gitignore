@@ -7,3 +7,13 @@ yolo11*.pt
 /.claude
 models/mahjong-yolo.pt
 *.mlmodel
+*.mlpackage
+*.png
+notebooks/*.pt
+/runs
+*.pyc
+/yolo_env
+/notebooks/runs
+/models/medium/mahjong-yolom-best.mlpackage
+models/extra_large/mahjong-yolox-best.onnx
+models/extra_large/mahjong-yolox-best.pt

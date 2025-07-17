@@ -23,7 +23,8 @@ This project implements mahjong tile recognition using YOLOv11, capable of:
 │   ├── extra_large/                 # YOLOv11x models (highest accuracy)
 │   └── *.onnx                       # ONNX format models for deployment
 ├── scripts/                         # Utility scripts
-│   └── convert_yolo_to_onnx.py      # Convert PyTorch models to ONNX
+│   ├── convert_yolo_to_onnx.py      # Convert PyTorch models to ONNX
+│   └── convert_yolo_to_coreml.py    # Convert PyTorch models to CoreML
 ├── notebooks/                       # Jupyter notebooks for training and analysis
 │   ├── data_labeling/               # Data annotation and labeling notebooks
 │   ├── data_processing/             # Data preprocessing notebooks
@@ -46,13 +47,13 @@ This project implements mahjong tile recognition using YOLOv11, capable of:
 
 ### Available Models
 
-| Model Size | Base Model | Trained Model | ONNX Model | Training Details | Speed | Accuracy | Use Case |
-|------------|------------|---------------|------------|------------------|-------|----------|----------|
-| Nano | yolo11n.pt | mahjong-yolon-best.pt | mahjong-yolon-best.onnx | yolon6 variant | ⚡⚡⚡⚡⚡ | ⭐⭐⭐ | Mobile/Edge devices |
-| Small | yolo11s.pt | mahjong-yolos-best.pt | mahjong-yolos-best.onnx | yolos2 variant | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ | Real-time applications |
-| Medium | yolo11m.pt | mahjong-yolom-best.pt | mahjong-yolom-best.onnx | 94 epochs | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | Balanced performance |
-| Large | yolo11l.pt | mahjong-yolol-best.pt | - | 51 epochs | ⚡⚡ | ⭐⭐⭐⭐⭐⭐ | High accuracy needs |
-| Extra Large | yolo11x.pt | - | - | Not trained yet | ⚡ | ⭐⭐⭐⭐⭐⭐⭐ | Maximum accuracy |
+| Model Size | Base Model | Trained Model | ONNX Model | CoreML Model | Training Details | Speed | Accuracy | Use Case |
+|------------|------------|---------------|------------|--------------|------------------|-------|----------|----------|
+| Nano | yolo11n.pt | mahjong-yolon-best.pt | mahjong-yolon-best.onnx | mahjong-yolon-best.mlpackage | yolon2 variant | ⚡⚡⚡⚡⚡ | ⭐⭐⭐ | Mobile/Edge devices |
+| Small | yolo11s.pt | mahjong-yolos-best.pt | mahjong-yolos-best.onnx | mahjong-yolos-best.mlpackage | yolos2 variant | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ | Real-time applications |
+| Medium | yolo11m.pt | mahjong-yolom-best.pt | mahjong-yolom-best.onnx | mahjong-yolom-best.mlpackage | yolom3 variant | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | Balanced performance |
+| Large | yolo11l.pt | mahjong-yolol-best.pt | mahjong-yolol-best.onnx | mahjong-yolol-best.mlpackage | yolol variant | ⚡⚡ | ⭐⭐⭐⭐⭐⭐ | High accuracy needs |
+| Extra Large | yolo11x.pt | mahjong-yolox-best.pt | mahjong-yolox-best.onnx | mahjong-yolox-best.mlpackage | yolox2 variant | ⚡ | ⭐⭐⭐⭐⭐⭐⭐ | Maximum accuracy |
 
 ### Model Performance
 
@@ -122,10 +123,17 @@ Convert PyTorch models to ONNX format:
 python scripts/convert_yolo_to_onnx.py models/medium/mahjong-yolom-best.pt
 ```
 
-Batch conversion:
+Convert PyTorch models to CoreML format:
+
+```bash
+python scripts/convert_yolo_to_coreml.py models/medium/mahjong-yolom-best.pt
+```
+
+Batch conversion (all models):
 
 ```bash
 python scripts/convert_yolo_to_onnx.py models/ --batch
+python scripts/convert_yolo_to_coreml.py models/ --batch
 ```
 
 ## 🎓 Training
@@ -256,6 +264,7 @@ Key training parameters to adjust:
 
 ### For Deployment
 - Use ONNX models for cross-platform compatibility
+- Use CoreML models for iOS/macOS deployment
 - Implement batch processing for multiple images
 - Use GPU acceleration when available
 
