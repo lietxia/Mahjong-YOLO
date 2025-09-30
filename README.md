@@ -47,13 +47,19 @@ This project implements mahjong tile recognition using YOLOv11, capable of:
 
 ### Currently Available Trained Models
 
-| Model Size | Base Model | Trained Model | Training Status | Speed | Accuracy | Use Case | Avg Detections |
-|------------|------------|---------------|-----------------|-------|----------|----------|----------------|
-| Nano | yolo11n.pt | trained_models_v2/yolo11n_best.pt | ✅ Complete | ⚡⚡⚡⚡⚡ | ⭐⭐⭐ | Mobile/Edge devices | 22.3 |
-| Small | yolo11s.pt | trained_models_v2/yolo11s_best.pt | ✅ Complete | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ | Real-time applications | 24.3 |
-| Medium | yolo11m.pt | trained_models_v2/yolo11m_best.pt | ✅ Complete | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | Balanced performance | 28.0 |
-| Large | yolo11l.pt | trained_models_v2/yolo11l_best.pt | 🔄 In Progress | ⚡⚡ | ⭐⭐⭐⭐⭐⭐ | High accuracy needs | - |
-| Extra Large | yolo11x.pt | - | ⏳ Planned | ⚡ | ⭐⭐⭐⭐⭐⭐⭐ | Maximum accuracy | - |
+| Model Size | Trained Model | Status | mAP50 | mAP50-95 | Precision | Recall | Size(MB) | Use Case |
+|------------|---------------|---------|-------|----------|-----------|---------|----------|----------|
+| Nano | trained_models_v2/yolo11n_best.pt | ✅ Complete | **0.880** | 0.676 | 0.943 | 0.748 | 5.2 | Mobile/Edge devices |
+| Small | trained_models_v2/yolo11s_best.pt | ✅ Complete | **0.881** | **0.695** | 0.929 | 0.765 | 18.3 | Real-time applications |
+| Medium | trained_models_v2/yolo11m_best.pt | ✅ Complete | 0.865 | 0.652 | 0.822 | **0.772** | 38.7 | Balanced performance |
+| Large | trained_models_v2/yolo11l_best.pt | 🔄 In Progress | - | - | - | - | - | High accuracy needs |
+| Extra Large | - | ⏳ Planned | - | - | - | - | - | Maximum accuracy |
+
+**Performance Summary:**
+- **Best Overall**: YOLOv11s (mAP50: 0.881, mAP50-95: 0.695)
+- **Highest Precision**: YOLOv11n (0.943)
+- **Best Recall**: YOLOv11m (0.772)
+- **Smallest Model**: YOLOv11n (5.2MB)
 
 ### Model Performance
 
@@ -96,21 +102,26 @@ results[0].show()
 
 ### 🎯 Inference Examples
 
-The repository includes visual examples demonstrating detection performance across different model sizes:
+Visual demonstration of mahjong tile detection across different model variants:
 
-![Model Comparison](inference_examples/comparison_58eec28b-000021.png)
+![Model Comparison](inference_examples/demo_result.png)
 
-**Detection Performance Summary:**
-- **YOLOv11n (Nano)**: Average 22.3 detections per image
-- **YOLOv11s (Small)**: Average 24.3 detections per image
-- **YOLOv11m (Medium)**: Average 28.0 detections per image
+**Performance Metrics:**
+- **mAP50** (Mean Average Precision at IoU=0.5): Measures detection accuracy
+- **mAP50-95** (Mean Average Precision at IoU=0.5:0.95): Stricter accuracy measure
+- **Precision**: Percentage of correct positive predictions
+- **Recall**: Percentage of actual positives correctly identified
+
+**Model Recommendations:**
+- **For Mobile Apps**: YOLOv11n (5.2MB, 0.943 precision)
+- **For Real-time Systems**: YOLOv11s (best overall mAP50: 0.881)
+- **For High Recall Needs**: YOLOv11m (0.772 recall, good for finding all tiles)
 
 **Sample Results:**
-- [YOLOv11n Examples](inference_examples/) - Fastest inference for mobile deployment
-- [YOLOv11s Examples](inference_examples/) - Balanced speed and accuracy
-- [YOLOv11m Examples](inference_examples/) - Best accuracy among completed models
+- [Individual Model Examples](inference_examples/) - Detailed comparisons across all models
+- [Model Validation](model_validation_results.csv) - Complete performance metrics
 
-Generated using: `python3 generate_inference_examples.py`
+Generated using: `python3 generate_inference_examples.py` and `python3 validate_models.py`
 
 ### Using ONNX Models
 
