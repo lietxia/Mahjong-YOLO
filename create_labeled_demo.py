@@ -122,21 +122,31 @@ def create_labeled_demo(image_path, model, output_path, conf_threshold=0.3):
                 # Create label with name and confidence
                 label_text = f'{tile_name}\n{conf:.3f}'
 
-                # Position label to avoid overlap
-                label_y = max(y1 - 10, 10)
+                # Position label ABOVE the detection box to avoid blocking the tile
+                # Calculate label height and ensure it doesn't go off-screen
+                label_height = 35  # Approximate height of label
+                label_y = max(y1 - label_height - 5, label_height + 5)
 
-                # Add label with contrasting background
+                # If we're too close to top, place below the box instead
+                if y1 < label_height + 10:
+                    label_y = y2 + 5
+                    valign = 'bottom'
+                else:
+                    label_y = y1 - 5
+                    valign = 'top'
+
+                # Add label with contrasting background - positioned to not block tile
                 bbox_props = dict(boxstyle="round,pad=0.4",
                                 facecolor=color, alpha=0.9,
                                 edgecolor='white', linewidth=2)
                 ax.text(x1, label_y, label_text, fontsize=10, color='white',
                        fontweight='bold', bbox=bbox_props,
-                       verticalalignment='top')
+                       verticalalignment=valign)
 
         # Add comprehensive statistics
         avg_conf = confidence_sum / detection_count if detection_count > 0 else 0
 
-        stats_text = f'Model: YOLOv11s (Best Performer)\n'
+        stats_text = f'Model: YOLOv11m (Best Recall)\n'
         stats_text += f'Total Detections: {detection_count}\n'
         stats_text += f'Average Confidence: {avg_conf:.3f}\n'
         stats_text += f'Confidence Threshold: {conf_threshold}'
@@ -200,8 +210,8 @@ def main():
     """Create labeled demo image"""
     print("🎯 Creating labeled detection demo...")
 
-    # Load best performing model (YOLOv11s)
-    model_path = 'trained_models_v2/yolo11s_best.pt'
+    # Load YOLOv11m model (better recall for finding all tiles)
+    model_path = 'trained_models_v2/yolo11m_best.pt'
 
     if not os.path.exists(model_path):
         print(f"❌ Model not found: {model_path}")
@@ -209,7 +219,7 @@ def main():
 
     try:
         model = YOLO(model_path)
-        print(f"✅ Loaded YOLOv11s model")
+        print(f"✅ Loaded YOLOv11m model")
     except Exception as e:
         print(f"❌ Failed to load model: {e}")
         return False

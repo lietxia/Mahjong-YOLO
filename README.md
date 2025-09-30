@@ -115,13 +115,15 @@ Visual demonstration of mahjong tile detection with labeled results and confiden
 **Model Recommendations:**
 - **For Mobile Apps**: YOLOv11n (5.2MB, 0.943 precision)
 - **For Real-time Systems**: YOLOv11s (best overall mAP50: 0.881)
-- **For High Recall Needs**: YOLOv11m (0.772 recall, good for finding all tiles)
+- **For High Recall Needs**: YOLOv11m (0.772 recall, good for finding all tiles) ⭐ **Used in Demo**
 
 **What the Demo Shows:**
 - **Clear Tile Identification**: Each detected tile shows its name (e.g., "2-Man", "East", "Red-Dragon")
 - **Confidence Scores**: Numerical confidence values (0.0-1.0) for each detection
+- **Non-Intrusive Labels**: Labels positioned above detection boxes to avoid blocking tiles
 - **Color Coding**: Different colors for tile types (Characters=Red, Circles=Teal, Bamboos=Blue, Honors=Green)
 - **Detection Statistics**: Total count, average confidence, and breakdown by tile type
+- **YOLOv11m Model**: Uses model with best recall (77.2%) for comprehensive tile detection
 
 **Additional Results:**
 - [Model Comparison](inference_examples/comparison_58eec28b-000021.png) - All three models side-by-side
