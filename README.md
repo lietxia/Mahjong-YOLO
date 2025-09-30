@@ -45,15 +45,15 @@ This project implements mahjong tile recognition using YOLOv11, capable of:
 
 ## 🚀 Model Variants
 
-### Available Models
+### Currently Available Trained Models
 
-| Model Size | Base Model | Trained Model | ONNX Model | CoreML Model | Training Details | Speed | Accuracy | Use Case |
-|------------|------------|---------------|------------|--------------|------------------|-------|----------|----------|
-| Nano | yolo11n.pt | mahjong-yolon-best.pt | mahjong-yolon-best.onnx | mahjong-yolon-best.mlpackage | yolon2 variant | ⚡⚡⚡⚡⚡ | ⭐⭐⭐ | Mobile/Edge devices |
-| Small | yolo11s.pt | mahjong-yolos-best.pt | mahjong-yolos-best.onnx | mahjong-yolos-best.mlpackage | yolos2 variant | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ | Real-time applications |
-| Medium | yolo11m.pt | mahjong-yolom-best.pt | mahjong-yolom-best.onnx | mahjong-yolom-best.mlpackage | yolom3 variant | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | Balanced performance |
-| Large | yolo11l.pt | mahjong-yolol-best.pt | mahjong-yolol-best.onnx | mahjong-yolol-best.mlpackage | yolol variant | ⚡⚡ | ⭐⭐⭐⭐⭐⭐ | High accuracy needs |
-| Extra Large | yolo11x.pt | mahjong-yolox-best.pt | mahjong-yolox-best.onnx | mahjong-yolox-best.mlpackage | yolox2 variant | ⚡ | ⭐⭐⭐⭐⭐⭐⭐ | Maximum accuracy |
+| Model Size | Base Model | Trained Model | Training Status | Speed | Accuracy | Use Case | Avg Detections |
+|------------|------------|---------------|-----------------|-------|----------|----------|----------------|
+| Nano | yolo11n.pt | trained_models_v2/yolo11n_best.pt | ✅ Complete | ⚡⚡⚡⚡⚡ | ⭐⭐⭐ | Mobile/Edge devices | 22.3 |
+| Small | yolo11s.pt | trained_models_v2/yolo11s_best.pt | ✅ Complete | ⚡⚡⚡⚡ | ⭐⭐⭐⭐ | Real-time applications | 24.3 |
+| Medium | yolo11m.pt | trained_models_v2/yolo11m_best.pt | ✅ Complete | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | Balanced performance | 28.0 |
+| Large | yolo11l.pt | trained_models_v2/yolo11l_best.pt | 🔄 In Progress | ⚡⚡ | ⭐⭐⭐⭐⭐⭐ | High accuracy needs | - |
+| Extra Large | yolo11x.pt | - | ⏳ Planned | ⚡ | ⭐⭐⭐⭐⭐⭐⭐ | Maximum accuracy | - |
 
 ### Model Performance
 
@@ -85,7 +85,7 @@ pip install jupyter notebook albumentations numpy
 from ultralytics import YOLO
 
 # Load a trained model
-model = YOLO('models/medium/mahjong-yolom-best.pt')
+model = YOLO('trained_models_v2/yolo11m_best.pt')
 
 # Run inference on an image
 results = model.predict('path/to/mahjong/image.jpg')
@@ -93,6 +93,24 @@ results = model.predict('path/to/mahjong/image.jpg')
 # Display results
 results[0].show()
 ```
+
+### 🎯 Inference Examples
+
+The repository includes visual examples demonstrating detection performance across different model sizes:
+
+![Model Comparison](inference_examples/comparison_58eec28b-000021.png)
+
+**Detection Performance Summary:**
+- **YOLOv11n (Nano)**: Average 22.3 detections per image
+- **YOLOv11s (Small)**: Average 24.3 detections per image
+- **YOLOv11m (Medium)**: Average 28.0 detections per image
+
+**Sample Results:**
+- [YOLOv11n Examples](inference_examples/) - Fastest inference for mobile deployment
+- [YOLOv11s Examples](inference_examples/) - Balanced speed and accuracy
+- [YOLOv11m Examples](inference_examples/) - Best accuracy among completed models
+
+Generated using: `python3 generate_inference_examples.py`
 
 ### Using ONNX Models
 
@@ -209,26 +227,27 @@ Training results include:
 
 ## 🎯 Mahjong Tile Classes
 
-The model recognizes the following mahjong tile types:
+The model recognizes 38 different mahjong tile types:
 
 ### Number Tiles (Man/Wan - Characters)
-- 1m through 9m
+- 1m through 9m, 0m (red five)
 
 ### Number Tiles (Pin/Bing - Circles)
-- 1p through 9p
+- 1p through 9p, 0p (red five)
 
 ### Number Tiles (Sou/Tiao - Bamboos)
-- 1s through 9s
+- 1s through 9s, 0s (red five)
 
-### Honor Tiles (Winds)
-- East, South, West, North
+### Honor Tiles (Winds - Z tiles)
+- 1z (East), 2z (South), 3z (West), 4z (North)
 
-### Honor Tiles (Dragons)
-- Red Dragon, Green Dragon, White Dragon
+### Honor Tiles (Dragons - Z tiles)
+- 5z (Red Dragon), 6z (Green Dragon), 7z (White Dragon)
 
-### Special Tiles
-- Flower tiles (if applicable)
-- Season tiles (if applicable)
+### Special Recognition
+- UNKNOWN class for unclear or damaged tiles
+
+**Total Classes**: 38 (including red fives and unknown category)
 
 ## 🔧 Customization
 
