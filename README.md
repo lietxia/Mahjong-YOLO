@@ -263,7 +263,7 @@ The model recognizes 38 different mahjong tile types:
 - 1z (East), 2z (South), 3z (West), 4z (North)
 
 ### Honor Tiles (Dragons - Z tiles)
-- 5z (Red Dragon), 6z (Green Dragon), 7z (White Dragon)
+- 5z (White Dragon), 6z (Green Dragon), 7z (Red Dragon)
 
 ### Special Recognition
 - UNKNOWN class for unclear or damaged tiles
