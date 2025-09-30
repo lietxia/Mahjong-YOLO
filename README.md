@@ -102,9 +102,9 @@ results[0].show()
 
 ### 🎯 Inference Examples
 
-Visual demonstration of mahjong tile detection across different model variants:
+Visual demonstration of mahjong tile detection with labeled results and confidence scores:
 
-![Model Comparison](inference_examples/demo_result.png)
+![Labeled Detection Demo](inference_examples/labeled_detection_demo.png)
 
 **Performance Metrics:**
 - **mAP50** (Mean Average Precision at IoU=0.5): Measures detection accuracy
@@ -117,11 +117,18 @@ Visual demonstration of mahjong tile detection across different model variants:
 - **For Real-time Systems**: YOLOv11s (best overall mAP50: 0.881)
 - **For High Recall Needs**: YOLOv11m (0.772 recall, good for finding all tiles)
 
-**Sample Results:**
-- [Individual Model Examples](inference_examples/) - Detailed comparisons across all models
+**What the Demo Shows:**
+- **Clear Tile Identification**: Each detected tile shows its name (e.g., "2-Man", "East", "Red-Dragon")
+- **Confidence Scores**: Numerical confidence values (0.0-1.0) for each detection
+- **Color Coding**: Different colors for tile types (Characters=Red, Circles=Teal, Bamboos=Blue, Honors=Green)
+- **Detection Statistics**: Total count, average confidence, and breakdown by tile type
+
+**Additional Results:**
+- [Model Comparison](inference_examples/comparison_58eec28b-000021.png) - All three models side-by-side
+- [Individual Model Examples](inference_examples/) - Detailed results for each model variant
 - [Model Validation](model_validation_results.csv) - Complete performance metrics
 
-Generated using: `python3 generate_inference_examples.py` and `python3 validate_models.py`
+Generated using: `python3 create_labeled_demo.py` and `python3 validate_models.py`
 
 ### Using ONNX Models
 
