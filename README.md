@@ -102,9 +102,9 @@ results[0].show()
 
 ### 🎯 Inference Examples
 
-Visual demonstration of mahjong tile detection with labeled results and confidence scores:
+Visual demonstration comparing ground truth labels vs model predictions:
 
-![Labeled Detection Demo](inference_examples/labeled_detection_demo.png)
+![Validation Demo](inference_examples/validation_demo.png)
 
 **Performance Metrics:**
 - **mAP50** (Mean Average Precision at IoU=0.5): Measures detection accuracy
@@ -117,20 +117,21 @@ Visual demonstration of mahjong tile detection with labeled results and confiden
 - **For Real-time Systems**: YOLOv11s (best overall mAP50: 0.881)
 - **For High Recall Needs**: YOLOv11m (0.772 recall, good for finding all tiles) ⭐ **Used in Demo**
 
-**What the Demo Shows:**
-- **Clear Tile Identification**: Each detected tile shows its name (e.g., "2-Man", "East", "Red-Dragon")
-- **Confidence Scores**: Numerical confidence values (0.0-1.0) for each detection
-- **Non-Intrusive Labels**: Labels positioned above detection boxes to avoid blocking tiles
-- **Color Coding**: Different colors for tile types (Characters=Red, Circles=Teal, Bamboos=Blue, Honors=Green)
-- **Detection Statistics**: Total count, average confidence, and breakdown by tile type
+**What the Validation Demo Shows:**
+- **Ground Truth vs Predictions**: Side-by-side comparison showing actual labels (left, green) vs model predictions (right, red)
+- **Real Performance Assessment**: Shows both correct detections and model limitations
+- **Detection Accuracy**: 27/29 ground truth objects correctly detected (93.1% recall)
+- **Precision Analysis**: Some false positives visible, showing where model over-detects
+- **Complex Scene Handling**: Demonstrates performance on challenging multi-tile layouts
 - **YOLOv11m Model**: Uses model with best recall (77.2%) for comprehensive tile detection
 
 **Additional Results:**
-- [Model Comparison](inference_examples/comparison_58eec28b-000021.png) - All three models side-by-side
-- [Individual Model Examples](inference_examples/) - Detailed results for each model variant
-- [Model Validation](model_validation_results.csv) - Complete performance metrics
+- [Complete Validation Report](inference_validation/validation_statistics.txt) - Detailed performance metrics
+- [8 Validation Images](inference_validation/) - Ground truth vs prediction comparisons
+- [Model Performance Metrics](model_validation_results.csv) - mAP, precision, recall for all models
+- [Class Configuration Verification](check_classes.py) - Confirms correct training setup
 
-Generated using: `python3 create_labeled_demo.py` and `python3 validate_models.py`
+Generated using: `python3 inference_validation.py` - comprehensive validation on multiple test images
 
 ### Using ONNX Models
 
