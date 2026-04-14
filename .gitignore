@@ -17,3 +17,16 @@ notebooks/*.pt
 /models/medium/mahjong-yolom-best.mlpackage
 models/extra_large/mahjong-yolox-best.onnx
 models/extra_large/mahjong-yolox-best.pt
+
+# macOS junk
+.DS_Store
+._*
+
+# Python cache
+__pycache__/
+
+# Frontend build artifacts
+node_modules/
+dist/
+.vite/
+coverage/
