@@ -1,12 +1,15 @@
 {
   "modelFile": "mahjong-yolon-best.onnx",
   "classesFile": "classes.json",
+  "baselinesFile": "python-baselines.json",
   "inputSize": 640,
   "confidenceThreshold": 0.3,
   "iouThreshold": 0.5,
   "ordering": "x-center-ascending",
+  "classesSource": "notebooks/data.yaml#names (37 classes)",
+  "baselineSource": "scripts/export_web_python_references.py -> models/nano/mahjong-yolon-best.onnx (deterministic web-route reference)",
   "notes": [
-    "Phase 1 assumes a single-row hand image and sorts detections left-to-right.",
+    "Phase 5 assumes a single-row hand image and sorts detections left-to-right.",
     "Scoring only supports recognized closed hands plus minimal manual context.",
     "Frontend class mapping is frozen here to avoid reusing inconsistent old repo metadata."
   ]
