@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import type { RecognizedTile } from '../lib/tile';
+import { createLabelPalette, getLabelColor } from '../lib/labels';
 
 const props = defineProps<{
   imageUrl: string | null;
@@ -10,6 +11,7 @@ const props = defineProps<{
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
 const hasContent = computed(() => Boolean(props.imageUrl));
+const palette = computed(() => createLabelPalette(props.detections.map((detection) => detection.label)));
 
 function draw() {
   const canvas = canvasRef.value;
@@ -39,8 +41,8 @@ function draw() {
 
     props.detections.forEach((detection, index) => {
       const [x1, y1, x2, y2] = detection.bbox;
-      const hue = (index * 31) % 360;
-      context.strokeStyle = `hsl(${hue} 80% 45%)`;
+      const color = getLabelColor(detection.label, palette.value);
+      context.strokeStyle = color;
       context.lineWidth = 2;
       context.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
@@ -49,7 +51,7 @@ function draw() {
       const textWidth = context.measureText(text).width + 12;
       const textHeight = 22;
       const labelY = Math.max(0, y1 - textHeight);
-      context.fillStyle = `hsl(${hue} 80% 45%)`;
+      context.fillStyle = color;
       context.fillRect(x1, labelY, textWidth, textHeight);
       context.fillStyle = '#ffffff';
       context.fillText(text, x1 + 6, labelY + 15);
@@ -65,7 +67,7 @@ watch(() => [props.imageUrl, props.detections], draw, { deep: true });
 <template>
   <div class="panel">
     <h2>检测结果</h2>
-    <p v-if="!hasContent">上传图片后会在这里叠加框、类别和置信度。</p>
+    <p v-if="!hasContent">选择图片并触发推理后，会在这里叠加框、类别和置信度。</p>
     <div class="canvas-wrapper">
       <canvas ref="canvasRef"></canvas>
     </div>
