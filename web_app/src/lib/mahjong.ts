@@ -89,7 +89,7 @@ export function calculateMahjongScore(tileLabels: string[], context: ScoreContex
   if (normalizedTiles.length !== 14) {
     return {
       status: 'incomplete',
-      message: `当前识别到 ${normalizedTiles.length} 张牌。Phase 1 只支持 14 张闭门和牌计算。`,
+        message: `当前识别到 ${normalizedTiles.length} 张牌。Phase 5 只支持 14 张闭门和牌计算。`,
       warnings,
       normalizedTiles,
       redDoraCount: countRedDora(normalizedTiles),
@@ -144,7 +144,7 @@ export function calculateMahjongScore(tileLabels: string[], context: ScoreContex
 
   return {
     status: 'ready',
-    message: warnings.length > 0 ? '已完成计算，但结果需要结合提示一起判断。' : '已完成 Phase 1 和牌计算。',
+        message: warnings.length > 0 ? '已完成计算，但结果需要结合提示一起判断。' : '已完成 Phase 5 和牌计算。',
     warnings,
     normalizedTiles,
     redDoraCount,
