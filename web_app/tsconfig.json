@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "preserve",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"],
+  "exclude": [
+    "vendor/mahjong-vue/src/main.ts",
+    "vendor/mahjong-vue/src/router/**/*",
+    "vendor/mahjong-vue/src/views/**/*",
+    "vendor/mahjong-vue/src/components/**/*",
+    "vendor/mahjong-vue/src/App.vue"
+  ]
+}
