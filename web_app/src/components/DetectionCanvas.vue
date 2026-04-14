@@ -13,6 +13,14 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 const hasContent = computed(() => Boolean(props.imageUrl));
 const palette = computed(() => createLabelPalette(props.detections.map((detection) => detection.label)));
 
+function getCanvasColors() {
+  const styles = getComputedStyle(document.documentElement);
+  return {
+    placeholder: styles.getPropertyValue('--color-text-muted').trim() || '#6b7280',
+    labelText: styles.getPropertyValue('--color-white').trim() || '#ffffff',
+  };
+}
+
 function draw() {
   const canvas = canvasRef.value;
   if (!canvas) {
@@ -27,7 +35,7 @@ function draw() {
   context.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!props.imageUrl) {
-    context.fillStyle = '#6b7280';
+    context.fillStyle = getCanvasColors().placeholder;
     context.font = '16px sans-serif';
     context.fillText('请先上传一张麻将牌图片。', 24, 40);
     return;
@@ -38,8 +46,9 @@ function draw() {
     canvas.width = image.naturalWidth;
     canvas.height = image.naturalHeight;
     context.drawImage(image, 0, 0);
+    const { labelText } = getCanvasColors();
 
-    props.detections.forEach((detection, index) => {
+    props.detections.forEach((detection) => {
       const [x1, y1, x2, y2] = detection.bbox;
       const color = getLabelColor(detection.label, palette.value);
       context.strokeStyle = color;
@@ -53,7 +62,7 @@ function draw() {
       const labelY = Math.max(0, y1 - textHeight);
       context.fillStyle = color;
       context.fillRect(x1, labelY, textWidth, textHeight);
-      context.fillStyle = '#ffffff';
+      context.fillStyle = labelText;
       context.fillText(text, x1 + 6, labelY + 15);
     });
   };

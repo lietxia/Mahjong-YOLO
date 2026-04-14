@@ -1,31 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import DetectionCanvas from './components/DetectionCanvas.vue';
-import LiveDetectionCanvas from './components/LiveDetectionCanvas.vue';
 import { clearRegisteredAssetCaches, registerAssetCacheServiceWorker, type AssetCacheStatus } from './lib/cache';
 import { compareWithBaseline, findBaselineSample } from './lib/baseline';
-import { getBrowserCompatibility } from './lib/compatibility';
-import { getCameraErrorMessage, getCameraVideoConstraints, getFrameSampleIntervalMs, isLowEndDevice } from './lib/live-camera';
+import { getBrowserCompatibility, getWebGpuAvailabilityState, isGpuAdapterUnavailableReason } from './lib/compatibility';
 import { calculateMahjongScore, type AgariType, type ScoreContext, type Wind } from './lib/mahjong';
 import { summarizeModelAssets } from './lib/labels';
 import { loadModelAssets, type ModelAssets } from './lib/manifest';
-import { countRedDora, sortTilesLeftToRight, toOrderedTileLabels, type RecognizedTile } from './lib/tile';
+import { countRedDora, toOrderedTileLabels, type RecognizedTile } from './lib/tile';
 import type { InferenceTimings } from './lib/yolo.messages';
 import type { InferenceOutcome, YoloBrowserRunner } from './lib/yolo';
 
-type ResultSource = 'upload' | 'camera';
-
-type LiveDetectionCanvasExpose = {
-  captureFrameBitmap: () => Promise<ImageBitmap | null>;
-  captureScreenshot: () => string | null;
-  hasReadyFrame: () => boolean;
-};
-
 const modelAssets = ref<ModelAssets | null>(null);
 const modelRunner = ref<YoloBrowserRunner | null>(null);
+const selectedModelId = ref('');
 const imageUrl = ref<string | null>(null);
 const selectedFile = ref<File | null>(null);
 const selectedFileName = ref('');
+const selectedImageName = ref('');
 const loadingAssets = ref(true);
 const preparingModel = ref(false);
 const runningInference = ref(false);
@@ -38,27 +30,11 @@ const outputShape = ref<number[]>([]);
 const timingMetrics = ref<InferenceTimings | null>(null);
 const modelReady = ref(false);
 const uploadInferenceAttempted = ref(false);
-const cameraInferenceAttempted = ref(false);
 const cacheStatus = ref<AssetCacheStatus | null>(null);
 const clearingCache = ref(false);
 const uploadDetections = ref<RecognizedTile[]>([]);
-const cameraDetections = ref<RecognizedTile[]>([]);
-const resultSource = ref<ResultSource>('upload');
 const scoreMessage = ref('');
-const selectedImageName = ref('');
-const liveCanvasRef = ref<LiveDetectionCanvasExpose | null>(null);
-const cameraStream = ref<MediaStream | null>(null);
-const cameraActive = ref(false);
-const cameraPaused = ref(false);
-const cameraStarting = ref(false);
-const cameraError = ref<string | null>(null);
-const cameraStatusMessage = ref('尚未启动摄像头实时检测。模型会在首次使用时按需初始化。');
-const hardwareConcurrency = ref<number | null>(typeof navigator !== 'undefined' ? navigator.hardwareConcurrency ?? null : null);
 const compatibility = ref(getBrowserCompatibility());
-
-let cameraAnimationFrameId = 0;
-let cameraInferenceInFlight = false;
-let lastCameraSampleStartedAt = 0;
 
 const scoreContext = reactive<ScoreContext>({
   fieldWind: 'east',
@@ -71,22 +47,15 @@ const scoreContext = reactive<ScoreContext>({
   uraIndicators: [],
 });
 
-const activeDetections = computed(() => (resultSource.value === 'camera' ? cameraDetections.value : uploadDetections.value));
-const uploadOrderedDetections = computed(() => sortTilesLeftToRight(uploadDetections.value));
-const cameraOrderedDetections = computed(() => sortTilesLeftToRight(cameraDetections.value));
-const orderedTiles = computed(() => toOrderedTileLabels(activeDetections.value));
+const modelOptions = computed(() => modelAssets.value?.manifest.models ?? []);
+const orderedTiles = computed(() => toOrderedTileLabels(uploadDetections.value));
 const redDoraCount = computed(() => countRedDora(orderedTiles.value));
-
 const scoring = computed(() => calculateMahjongScore(orderedTiles.value, scoreContext));
-
-const resultSourceLabel = computed(() => (resultSource.value === 'camera' ? '摄像头实时流' : '上传图片'));
-const cameraSupported = computed(() => compatibility.value.cameraSupported);
-const lowEndDevice = computed(() => isLowEndDevice(hardwareConcurrency.value));
-const cameraSampleIntervalMs = computed(() => getFrameSampleIntervalMs(backendUsed.value, hardwareConcurrency.value));
-const liveCanvasDetections = computed(() => (cameraPaused.value ? [] : cameraOrderedDetections.value));
 const inferenceSupported = computed(() => compatibility.value.inferenceSupported);
 const browserBlockingMessage = computed(() => compatibility.value.blockingIssues.join('；'));
-const compatibilityNotices = computed(() => compatibility.value.notices);
+const compatibilityNotices = computed(() =>
+  compatibility.value.notices.filter((notice) => !/getUserMedia|HTTPS 或 localhost|摄像头/.test(notice)),
+);
 const cacheStatusMessage = computed(() => cacheStatus.value?.message ?? '正在检查静态资源缓存策略...');
 const modelPreparationLabel = computed(() => {
   if (preparingModel.value) {
@@ -118,33 +87,41 @@ const executionPathLabel = computed(() => {
 
   return modelReady.value ? '等待推理请求' : '尚未建立会话';
 });
-const cameraEnvironmentLabel = computed(() => {
-  if (!compatibility.value.supportsCameraApi) {
-    return '浏览器不支持';
+const webGpuAvailabilityState = computed(() =>
+  getWebGpuAvailabilityState(compatibility.value.supportsWebGpu, backendUsed.value, backendFallbackReason.value),
+);
+const webGpuCapabilityLabel = computed(() => {
+  switch (webGpuAvailabilityState.value) {
+    case 'active':
+      return 'WebGPU 已启用';
+    case 'adapter-unavailable':
+      return '支持 API，但当前拿不到 GPU adapter';
+    case 'supported':
+      return '浏览器支持 WebGPU API';
+    case 'unsupported':
+      return '浏览器未提供 WebGPU API';
   }
-
-  if (!compatibility.value.secureContext) {
-    return '需要 HTTPS/localhost';
-  }
-
-  return '可用';
 });
+const activeModelLabel = computed(() => modelAssets.value?.manifest.activeModel.label ?? '未选择');
+const activeModelFile = computed(() => modelAssets.value?.manifest.modelFile ?? '未加载');
 const modelLifecycleMessage = computed(() => {
   if (loadingAssets.value) {
-    return '正在读取模型清单、类别和基线数据。首屏不会立即下载大体积 ONNX 模型。';
+    return '正在读取模型清单、可选模型、类别和基线数据。首屏不会立即下载 ONNX 模型。';
   }
 
   if (preparingModel.value) {
-    return '正在按需初始化 Web Worker 与模型会话，完成后会自动继续当前检测路径。';
+    return `正在按需初始化 ${activeModelLabel.value} 的 Web Worker 与模型会话，完成后会继续当前图片推理。`;
   }
 
   if (modelReady.value) {
     return backendUsed.value === 'webgpu'
-      ? '模型会话已就绪，当前优先使用 WebGPU；后续上传推理和实时检测会复用同一条 Worker 通路。'
-      : '模型会话已就绪，但当前运行在 WASM 回退路径；页面会继续保留既有功能，只是速度更慢。';
+      ? `模型会话已就绪，当前模型为 ${activeModelLabel.value}，并优先使用 WebGPU。`
+      : isGpuAdapterUnavailableReason(backendFallbackReason.value)
+        ? `当前模型为 ${activeModelLabel.value}；浏览器已暴露 WebGPU API，但当前环境没有返回可用 GPU adapter，已回退到 WASM。`
+        : `当前模型为 ${activeModelLabel.value}；模型会话已就绪，但当前运行在 WASM 回退路径。`;
   }
 
-  return '当前只预加载元数据；首次点击“运行 YOLO 推理”或“启动摄像头”时才会下载模型并建立 Worker 会话。';
+  return '当前只预加载元数据；首次点击“运行 YOLO 推理”时才会下载所选模型并建立 Worker 会话。';
 });
 const uploadEmptyMessage = computed(() => {
   if (!imageUrl.value) {
@@ -168,7 +145,9 @@ const uploadEmptyMessage = computed(() => {
   }
 
   if (!uploadInferenceAttempted.value) {
-    return modelReady.value ? '图片已选择，点击“运行 YOLO 推理”即可开始检测。' : '图片已选择；模型会在首次推理时按需初始化。';
+    return modelReady.value
+      ? `图片已选择，点击“运行 YOLO 推理”即可使用 ${activeModelLabel.value} 开始检测。`
+      : `图片已选择；${activeModelLabel.value} 会在首次推理时按需初始化。`;
   }
 
   if (uploadDetections.value.length === 0) {
@@ -177,104 +156,19 @@ const uploadEmptyMessage = computed(() => {
 
   return '';
 });
-const cameraHintMessage = computed(() => {
-  if (cameraError.value) {
-    return '';
-  }
-
-  if (!cameraActive.value) {
-    return '';
-  }
-
-  if (cameraStarting.value) {
-    return '正在请求摄像头权限并等待视频流。';
-  }
-
-  if (!cameraInferenceAttempted.value && !cameraPaused.value) {
-    return '摄像头已启动，正在等待首帧进入推理队列。';
-  }
-
-  if (cameraPaused.value && cameraDetections.value.length === 0) {
-    return '实时检测已暂停，当前还没有可展示的检测结果。';
-  }
-
-  if (!cameraPaused.value && cameraInferenceAttempted.value && cameraDetections.value.length === 0) {
-    return '当前采样帧未识别到麻将牌，可调整距离、光线或摆放角度。';
-  }
-
-  return '';
-});
-const liveCanvasPlaceholderMessage = computed(() => {
-  if (!cameraSupported.value) {
-    return compatibility.value.supportsCameraApi
-      ? '当前环境缺少 HTTPS 或 localhost，无法启动摄像头。'
-      : '当前浏览器不支持摄像头接口，只能使用图片上传推理。';
-  }
-
-  if (cameraStarting.value) {
-    return '正在请求摄像头权限并连接视频流...';
-  }
-
-  if (!cameraActive.value) {
-    return modelReady.value ? '启动摄像头后会在这里显示实时检测画面。' : '启动摄像头后会按需初始化模型并显示实时检测画面。';
-  }
-
-  if (cameraPaused.value) {
-    return '实时检测已暂停，可恢复推理或继续截图。';
-  }
-
-  if (!cameraInferenceAttempted.value) {
-    return '实时画面已连接，正在等待首帧推理结果...';
-  }
-
-  if (cameraDetections.value.length === 0) {
-    return '当前采样帧未识别到麻将牌，请调整画面。';
-  }
-
-  return '实时检测画面';
-});
-
-const cameraCapabilityMessage = computed(() => {
-  if (!cameraSupported.value) {
-    return compatibility.value.supportsCameraApi
-      ? '摄像头能力需要 HTTPS 或 localhost，当前环境下无法启用实时检测。'
-      : '当前环境不支持 getUserMedia，无法启用实时摄像头检测。';
-  }
-
-  if (!compatibility.value.supportsWebGpu && !backendUsed.value) {
-    return '当前浏览器未提供 WebGPU，首次模型初始化后会直接走 WASM 回退路径。';
-  }
-
-  if (backendUsed.value === 'wasm') {
-    return `Worker 当前运行在 WASM 回退路径，实时检测已自动降到约 ${(cameraSampleIntervalMs.value / 1000).toFixed(1)} 秒一帧。`;
-  }
-
-  if (lowEndDevice.value) {
-    return `检测到较低并发设备，实时检测会按约 ${(cameraSampleIntervalMs.value / 1000).toFixed(1)} 秒一帧采样，避免堆帧。`;
-  }
-
-  return '';
-});
-
 const readinessMessage = computed(() => {
   if (orderedTiles.value.length === 0) {
     return '还没有识别到可计算的牌。';
   }
+
   return scoring.value.message;
 });
-
 const modelInfo = computed(() => (modelAssets.value ? summarizeModelAssets(modelAssets.value) : null));
 
-const matchedBaseline = computed(() => {
-  if (resultSource.value !== 'upload') {
-    return null;
-  }
-
-  return findBaselineSample(selectedImageName.value, modelAssets.value);
-});
+const matchedBaseline = computed(() => findBaselineSample(selectedImageName.value, modelAssets.value));
 
 const baselineComparison = computed(() => {
-  if (!matchedBaseline.value) {
+  if (!uploadInferenceAttempted.value || !matchedBaseline.value) {
     return null;
   }
 
@@ -302,227 +196,51 @@ watch(orderedTiles, (tiles, previousTiles) => {
   scoreContext.agariIndex = Math.min(scoreContext.agariIndex, tiles.length - 1);
 });
 
-function applyInferenceOutcome(source: ResultSource, outcome: InferenceOutcome) {
-  if (source === 'upload') {
-    uploadInferenceAttempted.value = true;
-    uploadDetections.value = outcome.detections;
-    statusMessage.value =
-      outcome.backend === 'webgpu'
-        ? '上传图片推理已在 Web Worker 中通过 WebGPU 完成。'
-        : '上传图片推理当前来自 Web Worker 内的 WASM 回退路径。';
-    scoreMessage.value = `识别完成：${outcome.detections.length} 个框，已按从左到右提取 ${toOrderedTileLabels(outcome.detections).length} 张牌。`;
-  } else {
-    cameraInferenceAttempted.value = true;
-    cameraDetections.value = outcome.detections;
-    cameraError.value = null;
-    cameraStatusMessage.value =
-      outcome.backend === 'webgpu'
-        ? `实时检测运行中，当前按约 ${cameraSampleIntervalMs.value} ms 采样。`
-        : `实时检测运行中，但 Worker 已回退到 WASM，当前按约 ${cameraSampleIntervalMs.value} ms 采样。`;
-    scoreMessage.value = `实时检测：${outcome.detections.length} 个框，当前采样间隔约 ${cameraSampleIntervalMs.value} ms。`;
-  }
-
-  resultSource.value = source;
+function applyInferenceOutcome(outcome: InferenceOutcome) {
+  uploadInferenceAttempted.value = true;
+  uploadDetections.value = outcome.detections;
+  statusMessage.value =
+    outcome.backend === 'webgpu'
+      ? `上传图片推理已在 Web Worker 中通过 WebGPU 完成，当前模型为 ${activeModelLabel.value}。`
+      : `上传图片推理当前来自 Web Worker 内的 WASM 回退路径，当前模型为 ${activeModelLabel.value}。`;
+  scoreMessage.value = `识别完成：${outcome.detections.length} 个框，画布展示全部检测框；已按主排从左到右提取 ${toOrderedTileLabels(outcome.detections).length} 张牌。`;
   backendUsed.value = outcome.backend;
   backendFallbackReason.value = outcome.fallbackReason;
   outputShape.value = outcome.rawShape;
   timingMetrics.value = outcome.timings;
 }
 
-function stopCameraLoop() {
-  if (cameraAnimationFrameId !== 0) {
-    window.cancelAnimationFrame(cameraAnimationFrameId);
-    cameraAnimationFrameId = 0;
-  }
-
-  lastCameraSampleStartedAt = 0;
+function resetModelSession() {
+  modelRunner.value?.dispose();
+  modelRunner.value = null;
+  modelReady.value = false;
+  backendUsed.value = null;
+  backendFallbackReason.value = null;
+  outputShape.value = [];
+  timingMetrics.value = null;
 }
 
-function releaseCameraStream() {
-  stopCameraLoop();
-
-  const stream = cameraStream.value;
-  if (stream) {
-    stream.getTracks().forEach((track) => track.stop());
-  }
-
-  cameraStream.value = null;
-  cameraActive.value = false;
-  cameraPaused.value = false;
-}
-
-async function inferCurrentCameraFrame() {
-  if (cameraInferenceInFlight || !modelRunner.value) {
-    return;
-  }
-
-  const liveCanvas = liveCanvasRef.value;
-  const streamAtStart = cameraStream.value;
-  if (!liveCanvas || !streamAtStart) {
-    return;
-  }
-
-  cameraInferenceInFlight = true;
-
-  try {
-    const imageBitmap = await liveCanvas.captureFrameBitmap();
-    if (!imageBitmap) {
-      return;
-    }
-
-    const outcome = await modelRunner.value.infer(imageBitmap);
-    if (cameraStream.value !== streamAtStart) {
-      return;
-    }
-
-    applyInferenceOutcome('camera', outcome);
-  } catch (error) {
-    cameraError.value = error instanceof Error ? error.message : '摄像头推理失败';
-    cameraPaused.value = true;
-    cameraStatusMessage.value = '实时检测已暂停，请恢复或重新启动摄像头。';
-  } finally {
-    cameraInferenceInFlight = false;
-  }
-}
-
-function startCameraLoop() {
-  stopCameraLoop();
-
-  const tick = (now: number) => {
-    if (!cameraActive.value || !cameraStream.value) {
-      cameraAnimationFrameId = 0;
-      return;
-    }
-
-    cameraAnimationFrameId = window.requestAnimationFrame(tick);
-
-    if (cameraPaused.value || cameraInferenceInFlight || !modelRunner.value) {
-      return;
-    }
-
-    const liveCanvas = liveCanvasRef.value;
-    if (!liveCanvas?.hasReadyFrame()) {
-      return;
-    }
-
-    if (now - lastCameraSampleStartedAt < cameraSampleIntervalMs.value) {
-      return;
-    }
-
-    lastCameraSampleStartedAt = now;
-    void inferCurrentCameraFrame();
-  };
-
-  cameraAnimationFrameId = window.requestAnimationFrame(tick);
-}
-
-async function startCamera() {
-  if (!cameraSupported.value) {
-    cameraError.value = cameraCapabilityMessage.value;
-    cameraStatusMessage.value = cameraError.value;
-    return;
-  }
-
-  const modelReadyForCamera = await ensureModelReady('camera');
-  if (!modelReadyForCamera || !modelRunner.value) {
-    cameraError.value = assetError.value ?? '模型尚未初始化完成，请稍后再试。';
-    cameraStatusMessage.value = cameraError.value;
-    return;
-  }
-
-  cameraStarting.value = true;
-  cameraError.value = null;
-  cameraStatusMessage.value = '正在请求摄像头权限...';
-
-  try {
-    releaseCameraStream();
-    cameraDetections.value = [];
-    cameraInferenceAttempted.value = false;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: getCameraVideoConstraints(hardwareConcurrency.value),
-      audio: false,
-    });
-
-    cameraStream.value = stream;
-    cameraActive.value = true;
-    cameraPaused.value = false;
-    cameraStatusMessage.value = '摄像头已启动，正在等待首帧推理结果。';
-    startCameraLoop();
-  } catch (error) {
-    releaseCameraStream();
-    cameraError.value = getCameraErrorMessage(error);
-    cameraStatusMessage.value = cameraError.value;
-  } finally {
-    cameraStarting.value = false;
-  }
-}
-
-function pauseCamera() {
-  if (!cameraActive.value) {
-    return;
-  }
-
-  cameraPaused.value = true;
-  cameraStatusMessage.value = '已暂停实时检测，画面继续显示，可恢复推理或截图。';
-}
-
-function resumeCamera() {
-  if (!cameraActive.value) {
-    return;
-  }
-
-  cameraPaused.value = false;
-  cameraError.value = null;
-  lastCameraSampleStartedAt = 0;
-  cameraStatusMessage.value = `已恢复实时检测，当前按约 ${cameraSampleIntervalMs.value} ms 采样。`;
-}
-
-function stopCamera() {
-  releaseCameraStream();
-  cameraDetections.value = [];
-  cameraInferenceAttempted.value = false;
-  cameraError.value = null;
-  cameraStatusMessage.value = '摄像头已关闭。';
-
-  if (resultSource.value === 'camera') {
-    resultSource.value = 'upload';
-    outputShape.value = [];
-    timingMetrics.value = null;
-    scoreMessage.value = uploadDetections.value.length > 0 ? '摄像头已关闭，当前已切回上传图片结果。' : '';
-  }
-}
-
-function captureCameraScreenshot() {
-  const screenshot = liveCanvasRef.value?.captureScreenshot();
-  if (!screenshot) {
-    cameraError.value = '当前还没有可截图的实时画面。';
-    return;
-  }
-
-  const link = document.createElement('a');
-  link.href = screenshot;
-  link.download = `mahjong-camera-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
-  link.click();
-  cameraStatusMessage.value = '已保存当前实时画面截图。';
-}
-
-async function loadAssetsMetadata() {
+async function loadAssetsMetadata(modelId?: string): Promise<boolean> {
   loadingAssets.value = true;
   assetError.value = null;
   statusMessage.value = '正在读取模型清单、类别和基线数据...';
 
   try {
-    modelAssets.value = await loadModelAssets();
-    statusMessage.value = '页面已就绪。模型会在首次推理或启动摄像头时按需初始化。';
+    const assets = await loadModelAssets(modelId);
+    modelAssets.value = assets;
+    selectedModelId.value = assets.manifest.activeModel.id;
+    statusMessage.value = `页面已就绪。当前模型：${assets.manifest.activeModel.label}；首次推理时按需初始化。`;
+    return true;
   } catch (error) {
     assetError.value = error instanceof Error ? error.message : '初始化模型资源失败';
     statusMessage.value = '模型元数据读取失败，请检查静态资源是否已完整部署。';
+    return false;
   } finally {
     loadingAssets.value = false;
   }
 }
 
-async function ensureModelReady(source: ResultSource): Promise<boolean> {
+async function ensureModelReady(): Promise<boolean> {
   if (!inferenceSupported.value) {
     assetError.value = browserBlockingMessage.value || '当前浏览器环境不支持 Web 推理。';
     statusMessage.value = '当前浏览器环境不满足推理要求。';
@@ -530,7 +248,10 @@ async function ensureModelReady(source: ResultSource): Promise<boolean> {
   }
 
   if (!modelAssets.value) {
-    await loadAssetsMetadata();
+    const loaded = await loadAssetsMetadata(selectedModelId.value || undefined);
+    if (!loaded) {
+      return false;
+    }
   }
 
   if (!modelAssets.value) {
@@ -543,8 +264,7 @@ async function ensureModelReady(source: ResultSource): Promise<boolean> {
 
   preparingModel.value = true;
   assetError.value = null;
-  statusMessage.value =
-    source === 'camera' ? '正在按需初始化模型与 Worker，会在完成后启动实时检测...' : '正在按需初始化模型与 Worker，会在完成后继续图片推理...';
+  statusMessage.value = `正在按需初始化模型 ${modelAssets.value.manifest.activeModel.label} 与 Worker...`;
 
   const { YoloBrowserRunner: LazyYoloBrowserRunner } = await import('./lib/yolo');
   const runner = modelRunner.value ?? new LazyYoloBrowserRunner(modelAssets.value);
@@ -557,8 +277,8 @@ async function ensureModelReady(source: ResultSource): Promise<boolean> {
     backendFallbackReason.value = initResult.fallbackReason;
     statusMessage.value =
       initResult.backend === 'webgpu'
-        ? '模型初始化完成，当前使用 Web Worker + WebGPU。'
-        : '模型初始化完成，但当前运行在 Web Worker 内的 WASM 回退路径。';
+        ? `模型初始化完成，当前使用 ${modelAssets.value.manifest.activeModel.label} + Web Worker + WebGPU。`
+        : `模型初始化完成，当前使用 ${modelAssets.value.manifest.activeModel.label} + Web Worker 内的 WASM 回退路径。`;
     return true;
   } catch (error) {
     runner.dispose();
@@ -594,6 +314,25 @@ async function clearAssetCache() {
   }
 }
 
+async function onModelChange(event: Event) {
+  const nextModelId = (event.target as HTMLSelectElement).value;
+  if (!nextModelId || nextModelId === selectedModelId.value) {
+    return;
+  }
+
+  resetModelSession();
+  uploadInferenceAttempted.value = false;
+  uploadDetections.value = [];
+  inferenceError.value = null;
+  scoreMessage.value = '';
+  statusMessage.value = '正在切换模型...';
+
+  const loaded = await loadAssetsMetadata(nextModelId);
+  if (loaded && modelAssets.value) {
+    statusMessage.value = `已切换到 ${modelAssets.value.manifest.activeModel.label}，请重新运行推理。`;
+  }
+}
+
 function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -612,12 +351,9 @@ function onFileChange(event: Event) {
   uploadInferenceAttempted.value = false;
   uploadDetections.value = [];
   inferenceError.value = null;
-
-  if (resultSource.value === 'upload') {
-    outputShape.value = [];
-    timingMetrics.value = null;
-    scoreMessage.value = '';
-  }
+  outputShape.value = [];
+  timingMetrics.value = null;
+  scoreMessage.value = '';
 }
 
 async function runInference() {
@@ -627,19 +363,19 @@ async function runInference() {
 
   uploadInferenceAttempted.value = true;
   inferenceError.value = null;
-  const ready = await ensureModelReady('upload');
+  const ready = await ensureModelReady();
 
   if (!ready || !modelRunner.value) {
     return;
   }
 
   runningInference.value = true;
-  statusMessage.value = '正在通过 Web Worker 运行 YOLO 推理...';
+  statusMessage.value = `正在通过 Web Worker 运行 ${activeModelLabel.value} 的 YOLO 推理...`;
 
   try {
     const imageBitmap = await createImageBitmap(selectedFile.value);
     const outcome: InferenceOutcome = await modelRunner.value.infer(imageBitmap);
-    applyInferenceOutcome('upload', outcome);
+    applyInferenceOutcome(outcome);
   } catch (error) {
     inferenceError.value = error instanceof Error ? error.message : '推理失败';
   } finally {
@@ -651,6 +387,7 @@ function resetUpload() {
   if (imageUrl.value) {
     URL.revokeObjectURL(imageUrl.value);
   }
+
   imageUrl.value = null;
   selectedFile.value = null;
   selectedFileName.value = '';
@@ -658,18 +395,15 @@ function resetUpload() {
   uploadInferenceAttempted.value = false;
   uploadDetections.value = [];
   inferenceError.value = null;
-
-  if (resultSource.value === 'upload') {
-    statusMessage.value =
-      modelReady.value
-        ? backendUsed.value === 'webgpu'
-          ? '已清空当前图片与识别结果，Worker 仍保持 WebGPU 就绪。'
-          : '已清空当前图片与识别结果，Worker 当前仍使用 WASM 路径。'
-        : '已清空当前图片与识别结果；模型会继续保持按需初始化。';
-    outputShape.value = [];
-    timingMetrics.value = null;
-    scoreMessage.value = '';
-  }
+  outputShape.value = [];
+  timingMetrics.value = null;
+  scoreMessage.value = '';
+  statusMessage.value =
+    modelReady.value && modelAssets.value
+      ? backendUsed.value === 'webgpu'
+        ? `已清空当前图片与识别结果，${modelAssets.value.manifest.activeModel.label} 仍保持 WebGPU 就绪。`
+        : `已清空当前图片与识别结果，${modelAssets.value.manifest.activeModel.label} 当前仍使用 WASM 路径。`
+      : '已清空当前图片与识别结果；模型会继续保持按需初始化。';
 }
 
 function formatTiming(value: number): string {
@@ -706,10 +440,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  releaseCameraStream();
   if (imageUrl.value) {
     URL.revokeObjectURL(imageUrl.value);
   }
+
   modelRunner.value?.dispose();
 });
 </script>
@@ -718,9 +452,7 @@ onUnmounted(() => {
   <div class="page">
     <header class="page-header">
       <h1>Mahjong YOLO Phase 5 Web App</h1>
-      <p>
-        当前阶段保持既有的上传推理、实时摄像头、基线比对与麻将计分能力，同时补上按需模型初始化、缓存落点、兼容性说明与更完整的状态反馈。
-      </p>
+      <p>当前阶段保留上传推理、基线比对与麻将计分能力，已移除实时摄像头识别路径，并支持在多个 ONNX 模型之间切换。</p>
       <div class="status-banner">{{ statusMessage }}</div>
     </header>
 
@@ -733,47 +465,25 @@ onUnmounted(() => {
             <span v-if="selectedFileName">当前图片：{{ selectedFileName }}</span>
           </div>
 
+          <div v-if="modelOptions.length > 0" class="form-grid">
+            <label class="field full">
+              <span>推理模型</span>
+              <select :value="selectedModelId" :disabled="loadingAssets || preparingModel || runningInference" @change="onModelChange">
+                <option v-for="model in modelOptions" :key="model.id" :value="model.id">
+                  {{ model.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+
           <div class="action-row">
             <button :disabled="!imageUrl || runningInference || loadingAssets || preparingModel || !inferenceSupported" @click="runInference">
               {{ runningInference ? '推理中...' : preparingModel ? '初始化中...' : '运行 YOLO 推理' }}
             </button>
-            <button class="secondary" :disabled="!imageUrl && uploadDetections.length === 0" @click="resetUpload">
-              清空
-            </button>
+            <button class="secondary" :disabled="!imageUrl && uploadDetections.length === 0" @click="resetUpload">清空</button>
           </div>
 
           <div v-if="uploadEmptyMessage" class="message">{{ uploadEmptyMessage }}</div>
-
-          <h3>实时摄像头检测</h3>
-          <p class="footnote">
-            继续复用 Phase 3 worker 推理通路，只在主线程做视频绘制；实时路径按固定频率采样，并且同一时间只允许一个推理在途。
-          </p>
-
-          <div class="action-row">
-            <button :disabled="cameraActive || cameraStarting || loadingAssets || preparingModel || !cameraSupported || !inferenceSupported" @click="startCamera">
-              {{ cameraStarting ? '启动中...' : preparingModel ? '初始化中...' : '启动摄像头' }}
-            </button>
-            <button class="secondary" :disabled="!cameraActive" @click="cameraPaused ? resumeCamera() : pauseCamera()">
-              {{ cameraPaused ? '恢复检测' : '暂停检测' }}
-            </button>
-            <button class="secondary" :disabled="!cameraActive" @click="captureCameraScreenshot">截图</button>
-            <button class="secondary" :disabled="!cameraActive" @click="stopCamera">关闭摄像头</button>
-          </div>
-
-          <div class="meta-grid">
-            <div class="meta-item">
-              <span class="meta-label">实时状态</span>
-              {{ cameraActive ? (cameraPaused ? '已暂停' : '运行中') : '未启动' }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">采样频率</span>
-              约 {{ cameraSampleIntervalMs }} ms / 帧
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">设备策略</span>
-              {{ lowEndDevice ? '低负载模式' : '标准模式' }}
-            </div>
-          </div>
 
           <div class="meta-grid">
             <div class="meta-item">
@@ -786,11 +496,7 @@ onUnmounted(() => {
             </div>
             <div class="meta-item">
               <span class="meta-label">WebGPU 能力</span>
-              {{ compatibility.supportsWebGpu ? '浏览器可尝试 WebGPU' : '将走 WASM 回退' }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">摄像头环境</span>
-              {{ cameraEnvironmentLabel }}
+              {{ webGpuCapabilityLabel }}
             </div>
             <div class="meta-item">
               <span class="meta-label">静态缓存</span>
@@ -801,7 +507,7 @@ onUnmounted(() => {
           <div class="message">{{ modelLifecycleMessage }}</div>
           <div class="message">{{ cacheStatusMessage }}</div>
           <div class="action-row compact">
-            <button class="secondary" :disabled="clearingCache || loadingAssets || preparingModel || runningInference || cameraStarting" @click="clearAssetCache">
+            <button class="secondary" :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
               {{ clearingCache ? '清理中...' : '清理静态缓存' }}
             </button>
           </div>
@@ -818,16 +524,16 @@ onUnmounted(() => {
 
           <div v-if="assetError" class="message warning">模型资源初始化失败：{{ assetError }}</div>
           <div v-if="inferenceError" class="message warning">推理失败：{{ inferenceError }}</div>
-          <div class="message">{{ cameraStatusMessage }}</div>
-          <div v-if="cameraHintMessage" class="message">{{ cameraHintMessage }}</div>
-          <div v-if="cameraError" class="message warning">摄像头错误：{{ cameraError }}</div>
-          <div v-else-if="cameraCapabilityMessage" class="message warning">{{ cameraCapabilityMessage }}</div>
           <div v-if="scoreMessage" class="message">{{ scoreMessage }}</div>
 
           <div v-if="modelInfo" class="meta-grid">
             <div class="meta-item">
-              <span class="meta-label">模型文件</span>
+              <span class="meta-label">当前模型</span>
               {{ modelInfo.model }}
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">模型文件</span>
+              {{ modelInfo.modelFile }}
             </div>
             <div class="meta-item">
               <span class="meta-label">输入尺寸</span>
@@ -879,11 +585,16 @@ onUnmounted(() => {
           </div>
 
           <div v-if="backendFallbackReason" class="message warning">
-            WebGPU 未能在 worker 中启用，当前已回退到 WASM：{{ backendFallbackReason }}
+            <template v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
+              浏览器已暴露 WebGPU API，但当前环境没有返回可用 GPU adapter，应用已回退到 WASM：{{ backendFallbackReason }}
+            </template>
+            <template v-else>
+              WebGPU 未能在 worker 中启用，当前已回退到 WASM：{{ backendFallbackReason }}
+            </template>
           </div>
 
           <div v-if="orderedTiles.length > 0" class="message">
-            当前结果来源：{{ resultSourceLabel }}。仍沿用单排手牌假设，按检测框中心点从左到右排序。
+            当前结果来自上传图片。画布显示全部后处理检测框；计分与基线比对仍沿用单排手牌假设，并按检测框中心点从左到右排序主排结果。
           </div>
 
           <div v-if="baselineComparison" class="message" :class="{ warning: !baselineComparison.exactMatch }">
@@ -896,18 +607,12 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <DetectionCanvas :image-url="imageUrl" :detections="uploadOrderedDetections" />
-        <LiveDetectionCanvas
-          ref="liveCanvasRef"
-          :stream="cameraStream"
-          :detections="liveCanvasDetections"
-          :placeholder-message="liveCanvasPlaceholderMessage"
-        />
+        <DetectionCanvas :image-url="imageUrl" :detections="uploadDetections" />
 
         <div class="panel">
           <h2>识别到的牌</h2>
           <p>
-            当前来源：{{ resultSourceLabel }}，共识别 {{ orderedTiles.length }} 张牌。当前只支持 <strong>14 张闭门手牌</strong>
+            当前来源：上传图片，共识别 {{ orderedTiles.length }} 张牌。当前只支持 <strong>14 张闭门手牌</strong>
             的最小和牌计算。
           </p>
           <div class="tile-list">
@@ -924,6 +629,7 @@ onUnmounted(() => {
             </span>
           </div>
           <div class="footnote">赤宝牌计数（按 0m/0p/0s 自动统计）：{{ redDoraCount }}</div>
+          <div class="footnote">当前模型文件：{{ activeModelFile }}</div>
           <div v-if="baselineComparison && baselineComparison.mismatches.length > 0" class="footnote">
             基线差异：
             {{ baselineComparison.mismatches.slice(0, 5).map((item) => `#${item.index}: ${item.expected ?? '∅'} → ${item.actual ?? '∅'}`).join(' / ') }}
@@ -1033,9 +739,7 @@ onUnmounted(() => {
               </li>
             </ul>
 
-            <div v-if="scoring.result.fuMessages.length > 0" class="footnote">
-              符说明：{{ scoring.result.fuMessages.join(' / ') }}
-            </div>
+            <div v-if="scoring.result.fuMessages.length > 0" class="footnote">符说明：{{ scoring.result.fuMessages.join(' / ') }}</div>
             <div v-if="scoring.warnings.length > 0" class="message warning">
               {{ scoring.warnings.join('；') }}
             </div>
@@ -1047,9 +751,7 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <div class="footnote">
-            限制：Phase 5 仍不自动识别副露、宝牌指示牌、里宝牌、立直信息或桌面完整局况，需人工补录必要上下文。
-          </div>
+          <div class="footnote">限制：Phase 5 仍不自动识别副露、宝牌指示牌、里宝牌、立直信息或桌面完整局况，需人工补录必要上下文。</div>
         </div>
       </aside>
     </div>

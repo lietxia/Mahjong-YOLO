@@ -131,6 +131,64 @@ def compute_iou(box_a: list[float], box_b: list[float]) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+def median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+
+    sorted_values = sorted(values)
+    middle = len(sorted_values) // 2
+    if len(sorted_values) % 2 == 0:
+        return (sorted_values[middle - 1] + sorted_values[middle]) / 2
+    return sorted_values[middle]
+
+
+def vertical_spread(candidates: list[dict[str, float | int]]) -> float:
+    if not candidates:
+        return float("inf")
+
+    centers = [float(candidate["center_y"]) for candidate in candidates]
+    return max(centers) - min(centers)
+
+
+def select_primary_horizontal_row(
+    candidates: list[dict[str, float | int]],
+) -> list[dict[str, float | int]]:
+    if len(candidates) <= 2:
+        return list(candidates)
+
+    median_height = median([float(candidate["height"]) for candidate in candidates])
+    row_tolerance = max(8.0, median_height * 0.5)
+
+    best_group: list[dict[str, float | int]] = []
+    best_confidence_sum = float("-inf")
+    best_spread = float("inf")
+
+    for anchor in candidates:
+        anchor_y = float(anchor["center_y"])
+        group = [
+            candidate
+            for candidate in candidates
+            if abs(float(candidate["center_y"]) - anchor_y) <= row_tolerance
+        ]
+        confidence_sum = sum(float(candidate["score"]) for candidate in group)
+        spread = vertical_spread(group)
+
+        if (
+            len(group) > len(best_group)
+            or (len(group) == len(best_group) and confidence_sum > best_confidence_sum)
+            or (
+                len(group) == len(best_group)
+                and confidence_sum == best_confidence_sum
+                and spread < best_spread
+            )
+        ):
+            best_group = group
+            best_confidence_sum = confidence_sum
+            best_spread = spread
+
+    return list(best_group) if best_group else list(candidates)
+
+
 def predict_ordered_tiles(
     session: ort.InferenceSession, classes: list[str], image_path: Path
 ) -> list[str]:
@@ -173,7 +231,7 @@ def predict_ordered_tiles(
             continue
         kept.append(detection)
 
-    ordered = []
+    ordered_candidates = []
     for detection in kept:
         x1, y1, x2, y2 = detection["bbox"]
         restored = [
@@ -186,16 +244,19 @@ def predict_ordered_tiles(
                 meta["original_height"], max(0.0, (y2 - meta["pad_y"]) / meta["scale"])
             ),
         ]
-        ordered.append(
-            (
-                ((restored[0] + restored[2]) / 2),
-                ((restored[1] + restored[3]) / 2),
-                classes[detection["class_id"]],
-            )
+        ordered_candidates.append(
+            {
+                "center_x": (restored[0] + restored[2]) / 2,
+                "center_y": (restored[1] + restored[3]) / 2,
+                "label": classes[detection["class_id"]],
+                "score": float(detection["score"]),
+                "height": restored[3] - restored[1],
+            }
         )
 
-    ordered.sort(key=lambda item: (item[0], item[1]))
-    return [item[2] for item in ordered]
+    selected = select_primary_horizontal_row(ordered_candidates)
+    selected.sort(key=lambda item: (float(item["center_x"]), float(item["center_y"])))
+    return [str(item["label"]) for item in selected]
 
 
 def main() -> int:

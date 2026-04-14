@@ -22,6 +22,8 @@ export type BrowserCompatibility = {
   notices: string[];
 };
 
+export type WebGpuAvailabilityState = 'unsupported' | 'supported' | 'adapter-unavailable' | 'active';
+
 function isLocalhost(hostname: string | undefined): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
@@ -79,4 +81,32 @@ export function getBrowserCompatibility(
     blockingIssues,
     notices,
   };
+}
+
+export function isGpuAdapterUnavailableReason(reason: string | null): boolean {
+  if (!reason) {
+    return false;
+  }
+
+  return /failed to get gpu adapter/i.test(reason) || /gpu adapter/i.test(reason);
+}
+
+export function getWebGpuAvailabilityState(
+  supportsWebGpu: boolean,
+  backendUsed: 'webgpu' | 'wasm' | null,
+  fallbackReason: string | null,
+): WebGpuAvailabilityState {
+  if (backendUsed === 'webgpu') {
+    return 'active';
+  }
+
+  if (!supportsWebGpu) {
+    return 'unsupported';
+  }
+
+  if (backendUsed === 'wasm' && isGpuAdapterUnavailableReason(fallbackReason)) {
+    return 'adapter-unavailable';
+  }
+
+  return 'supported';
 }

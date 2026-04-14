@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getBrowserCompatibility } from './compatibility';
+import { getBrowserCompatibility, getWebGpuAvailabilityState, isGpuAdapterUnavailableReason } from './compatibility';
 
 const mockWorker = (() => undefined) as unknown as typeof Worker;
 const mockFetch = (async () => new Response('{}')) as typeof fetch;
@@ -59,5 +59,17 @@ describe('browser compatibility helpers', () => {
     expect(compatibility.inferenceSupported).toBe(true);
     expect(compatibility.cameraSupported).toBe(false);
     expect(compatibility.notices.join('；')).toContain('HTTPS');
+  });
+
+  it('distinguishes api support from adapter acquisition failure', () => {
+    expect(getWebGpuAvailabilityState(true, null, null)).toBe('supported');
+    expect(getWebGpuAvailabilityState(true, 'wasm', 'Failed to get GPU adapter')).toBe('adapter-unavailable');
+    expect(getWebGpuAvailabilityState(true, 'webgpu', null)).toBe('active');
+    expect(getWebGpuAvailabilityState(false, null, null)).toBe('unsupported');
+  });
+
+  it('detects adapter unavailable fallback reason', () => {
+    expect(isGpuAdapterUnavailableReason('Failed to get GPU adapter.')).toBe(true);
+    expect(isGpuAdapterUnavailableReason('WebGPU session init failed')).toBe(false);
   });
 });

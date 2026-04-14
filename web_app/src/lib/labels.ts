@@ -21,7 +21,8 @@ export function getLabelColor(label: string, palette: Record<string, string>): s
 
 export function summarizeModelAssets(assets: ModelAssets) {
   return {
-    model: assets.manifest.modelFile,
+    model: assets.manifest.activeModel.label,
+    modelFile: assets.manifest.modelFile,
     inputSize: assets.manifest.inputSize,
     classCount: assets.classes.length,
     confidence: assets.manifest.confidenceThreshold,
