@@ -504,15 +504,15 @@ onUnmounted(() => {
         <el-scrollbar height="100%">
           <el-space direction="vertical" fill size="large">
             <el-space wrap>
-              <el-radio-group
+              <el-select
                 v-if="modelOptions.length > 0"
                 v-model="selectedModelId"
-                size="default"
+                placeholder="选择模型"
                 :disabled="loadingAssets || preparingModel || runningInference"
                 @change="onModelChange"
               >
-                <el-radio-button v-for="model in modelOptions" :key="model.id" :value="model.id">{{ model.label }}</el-radio-button>
-              </el-radio-group>
+                <el-option v-for="model in modelOptions" :key="model.id" :label="model.label" :value="model.id" />
+              </el-select>
               <el-button type="primary" :disabled="!canRunInference" @click="runInference">
                 {{ runningInference ? '推理中...' : preparingModel ? '初始化中...' : '运行 YOLO 推理' }}
               </el-button>
@@ -542,139 +542,130 @@ onUnmounted(() => {
       <el-splitter-panel size="32%" min="320">
         <el-scrollbar height="100%">
           <el-space direction="vertical" fill size="large">
-            <el-card>
-              <template #header>状态与结果</template>
-              <el-space direction="vertical" fill>
-                <el-alert v-if="uploadEmptyMessage" :title="uploadEmptyMessage" type="info" :closable="false" show-icon />
-                <el-alert v-if="assetError" :title="`模型资源初始化失败：${assetError}`" type="warning" :closable="false" show-icon />
-                <el-alert v-if="inferenceError" :title="`推理失败：${inferenceError}`" type="warning" :closable="false" show-icon />
-                <el-alert v-if="scoreMessage" :title="scoreMessage" type="success" :closable="false" show-icon />
+            <el-card header="状态与结果">
+              <el-alert v-if="uploadEmptyMessage" :title="uploadEmptyMessage" type="info" :closable="false" show-icon />
+              <el-alert v-if="assetError" :title="`初始化失败：${assetError}`" type="warning" :closable="false" show-icon />
+              <el-alert v-if="inferenceError" :title="`推理失败：${inferenceError}`" type="warning" :closable="false" show-icon />
+              <el-alert v-if="scoreMessage" :title="scoreMessage" type="success" :closable="false" show-icon />
 
-                <el-descriptions :column="2" border>
-                  <el-descriptions-item label="模型准备">{{ modelPreparationLabel }}</el-descriptions-item>
-                  <el-descriptions-item label="当前执行路径">{{ executionPathLabel }}</el-descriptions-item>
-                  <el-descriptions-item label="WebGPU 能力">{{ webGpuCapabilityLabel }}</el-descriptions-item>
-                  <el-descriptions-item label="静态缓存">{{ cacheStatus?.enabled ? 'Service Worker 已启用' : '未启用 SW 缓存' }}</el-descriptions-item>
-                </el-descriptions>
+              <el-descriptions :column="2" border>
+                <el-descriptions-item label="模型准备">{{ modelPreparationLabel }}</el-descriptions-item>
+                <el-descriptions-item label="执行路径">{{ executionPathLabel }}</el-descriptions-item>
+                <el-descriptions-item label="WebGPU">{{ webGpuCapabilityLabel }}</el-descriptions-item>
+                <el-descriptions-item label="缓存">{{ cacheStatus?.enabled ? 'SW 已启用' : '未启用' }}</el-descriptions-item>
+              </el-descriptions>
 
-                <el-collapse>
-                  <el-collapse-item title="诊断详情" name="diagnostics">
-                    <el-space direction="vertical" fill>
-                      <el-alert :title="modelLifecycleMessage" type="info" :closable="false" show-icon />
-                      <el-alert :title="cacheStatusMessage" type="info" :closable="false" show-icon />
+              <el-collapse>
+                <el-collapse-item title="诊断详情" name="diagnostics">
+                  <el-alert :title="modelLifecycleMessage" type="info" :closable="false" show-icon />
+                  <el-alert :title="cacheStatusMessage" type="info" :closable="false" show-icon />
 
-                      <el-button :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
-                        {{ clearingCache ? '清理中...' : '清理静态缓存' }}
-                      </el-button>
+                  <el-button :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
+                    {{ clearingCache ? '清理中...' : '清理静态缓存' }}
+                  </el-button>
 
-                      <el-alert v-if="browserBlockingMessage" :title="`当前浏览器环境不满足推理要求：${browserBlockingMessage}`" type="warning" :closable="false" show-icon />
-                      <el-alert v-else-if="compatibilityNotices.length > 0" type="info" :closable="false" show-icon>
-                        <template #title>兼容性提示</template>
-                        <ul>
-                          <li v-for="notice in compatibilityNotices" :key="notice">{{ notice }}</li>
-                        </ul>
-                      </el-alert>
+                  <el-alert v-if="browserBlockingMessage" :title="`浏览器不满足推理要求：${browserBlockingMessage}`" type="warning" :closable="false" show-icon />
+                  <el-alert v-else-if="compatibilityNotices.length > 0" type="info" :closable="false" show-icon>
+                    <template #title>兼容性提示</template>
+                    <ul>
+                      <li v-for="notice in compatibilityNotices" :key="notice">{{ notice }}</li>
+                    </ul>
+                  </el-alert>
 
-                      <el-alert v-if="backendFallbackReason" type="warning" :closable="false" show-icon>
-                        <template #title>
-                          <span v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
-                            浏览器已暴露 WebGPU API，但当前环境没有返回可用 GPU adapter，应用已回退到 WASM：{{ backendFallbackReason }}
-                          </span>
-                          <span v-else>WebGPU 未能在 worker 中启用，当前已回退到 WASM：{{ backendFallbackReason }}</span>
-                        </template>
-                      </el-alert>
+                  <el-alert v-if="backendFallbackReason" type="warning" :closable="false" show-icon>
+                    <template #title>
+                      <span v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
+                        WebGPU API 可用但无 GPU adapter，已回退 WASM：{{ backendFallbackReason }}
+                      </span>
+                      <span v-else>WebGPU 未能启用，已回退 WASM：{{ backendFallbackReason }}</span>
+                    </template>
+                  </el-alert>
 
-                      <el-descriptions v-if="modelInfo" :column="2" border>
-                        <el-descriptions-item label="当前模型">{{ modelInfo.model }}</el-descriptions-item>
-                        <el-descriptions-item label="模型文件">{{ modelInfo.modelFile }}</el-descriptions-item>
-                        <el-descriptions-item label="输入尺寸">{{ modelInfo.inputSize }}</el-descriptions-item>
-                        <el-descriptions-item label="类别数">{{ modelInfo.classCount }}</el-descriptions-item>
-                        <el-descriptions-item label="阈值">conf={{ modelInfo.confidence }}, iou={{ modelInfo.iou }}</el-descriptions-item>
-                        <el-descriptions-item label="后端">{{ backendUsed ?? '未运行' }}</el-descriptions-item>
-                        <el-descriptions-item label="执行线程">Web Worker</el-descriptions-item>
-                        <el-descriptions-item label="输出形状">{{ outputShape.length > 0 ? JSON.stringify(outputShape) : '未返回' }}</el-descriptions-item>
-                      </el-descriptions>
+                  <el-descriptions v-if="modelInfo" :column="2" border>
+                    <el-descriptions-item label="模型">{{ modelInfo.model }}</el-descriptions-item>
+                    <el-descriptions-item label="文件">{{ modelInfo.modelFile }}</el-descriptions-item>
+                    <el-descriptions-item label="输入">{{ modelInfo.inputSize }}</el-descriptions-item>
+                    <el-descriptions-item label="类别">{{ modelInfo.classCount }}</el-descriptions-item>
+                    <el-descriptions-item label="阈值">conf={{ modelInfo.confidence }}, iou={{ modelInfo.iou }}</el-descriptions-item>
+                    <el-descriptions-item label="后端">{{ backendUsed ?? '未运行' }}</el-descriptions-item>
+                    <el-descriptions-item label="线程">Web Worker</el-descriptions-item>
+                    <el-descriptions-item label="输出形状">{{ outputShape.length > 0 ? JSON.stringify(outputShape) : '未返回' }}</el-descriptions-item>
+                  </el-descriptions>
 
-                      <el-descriptions v-if="timingMetrics" :column="2" border>
-                        <el-descriptions-item label="预处理">{{ formatTiming(timingMetrics.preprocessMs) }}；worker 内图像 letterbox 与 tensor 化</el-descriptions-item>
-                        <el-descriptions-item label="模型推理">{{ formatTiming(timingMetrics.inferenceMs) }}；ONNX Runtime Web 执行耗时</el-descriptions-item>
-                        <el-descriptions-item label="后处理">{{ formatTiming(timingMetrics.postprocessMs) }}；decode / 阈值过滤 / NMS</el-descriptions-item>
-                        <el-descriptions-item label="总耗时">{{ formatTiming(timingMetrics.totalMs) }}；不含主线程绘制时间</el-descriptions-item>
-                      </el-descriptions>
-                    </el-space>
-                  </el-collapse-item>
-                </el-collapse>
-              </el-space>
+                  <el-descriptions v-if="timingMetrics" :column="2" border>
+                    <el-descriptions-item label="预处理">{{ formatTiming(timingMetrics.preprocessMs) }}</el-descriptions-item>
+                    <el-descriptions-item label="推理">{{ formatTiming(timingMetrics.inferenceMs) }}</el-descriptions-item>
+                    <el-descriptions-item label="后处理">{{ formatTiming(timingMetrics.postprocessMs) }}</el-descriptions-item>
+                    <el-descriptions-item label="总耗时">{{ formatTiming(timingMetrics.totalMs) }}</el-descriptions-item>
+                  </el-descriptions>
+                </el-collapse-item>
+              </el-collapse>
             </el-card>
 
-            <el-card>
-              <template #header>最可能手牌推荐</template>
-              <el-space direction="vertical" fill>
-                <el-alert
-                  v-if="baselineComparison"
-                  :title="baselineComparison.exactMatch
-                    ? `基线比对通过：${baselineComparison.sample.imageName} 的识别序列与当前内置基线一致。`
-                    : `基线比对未通过：当前 ${baselineComparison.actualCount} 张，基线 ${baselineComparison.expectedCount} 张，差异 ${baselineComparison.mismatches.length} 处。`"
-                  :type="baselineComparison.exactMatch ? 'success' : 'warning'"
-                  :closable="false"
-                  show-icon
-                />
+            <el-card header="手牌推荐">
+              <el-alert
+                v-if="baselineComparison"
+                :title="baselineComparison.exactMatch
+                  ? `基线比对通过：${baselineComparison.sample.imageName} 与内置基线一致。`
+                  : `基线未通过：当前 ${baselineComparison.actualCount} 张，基线 ${baselineComparison.expectedCount} 张，差异 ${baselineComparison.mismatches.length} 处。`"
+                :type="baselineComparison.exactMatch ? 'success' : 'warning'"
+                :closable="false"
+                show-icon
+              />
 
-                <el-empty v-if="recommendedTiles.length === 0" description="当前还没有可推荐的手牌序列。" />
-                <template v-else>
-                  <el-space wrap>
-                    <el-tag
-                      v-for="(tile, index) in recommendedTiles"
-                      :key="`recommended-${tile}-${index}`"
-                      :type="isMahjongTileCode(tile) ? 'info' : 'danger'"
-                      effect="plain"
-                    >
-                      {{ tile }}
-                    </el-tag>
-                  </el-space>
-                  <el-text type="info" size="small">推荐序列赤宝牌计数（按 0m/0p/0s 自动统计）：{{ recommendedRedDoraCount }}</el-text>
-                </template>
-
-                <el-input
-                  v-model="editableRecommendedHand"
-                  type="textarea"
-                  :rows="3"
-                  placeholder="用于计分的手牌（默认取自推荐结果，可编辑；支持空格、逗号、换行）"
-                />
-
-                <el-space v-if="scoringTiles.length > 0" wrap>
+              <el-empty v-if="recommendedTiles.length === 0" description="当前还没有可推荐的手牌序列。" />
+              <template v-else>
+                <el-space wrap>
                   <el-tag
-                    v-for="(tile, index) in scoringTiles"
-                    :key="`scoring-${tile}-${index}`"
-                    :type="!isMahjongTileCode(tile) ? 'danger' : index === scoreContext.agariIndex ? 'warning' : 'info'"
+                    v-for="(tile, index) in recommendedTiles"
+                    :key="`recommended-${tile}-${index}`"
+                    :type="isMahjongTileCode(tile) ? 'info' : 'danger'"
                     effect="plain"
                   >
                     {{ tile }}
                   </el-tag>
                 </el-space>
+                <el-text type="info" size="small">赤宝牌：{{ recommendedRedDoraCount }}</el-text>
+              </template>
 
-                <el-text type="info" size="small">当前计分输入共 {{ scoringTiles.length }} 张；赤宝牌计数：{{ scoringRedDoraCount }}</el-text>
-                <el-text v-if="baselineComparison && baselineComparison.mismatches.length > 0" type="warning" size="small">
-                  基线差异：{{ baselineComparison.mismatches.slice(0, 5).map((item) => `#${item.index}: ${item.expected ?? '∅'} → ${item.actual ?? '∅'}`).join(' / ') }}
-                </el-text>
+              <el-input
+                v-model="editableRecommendedHand"
+                type="textarea"
+                :rows="3"
+                placeholder="用于计分的手牌（默认取自推荐，可编辑；空格/逗号/换行分隔）"
+              />
+
+              <el-space v-if="scoringTiles.length > 0" wrap>
+                <el-tag
+                  v-for="(tile, index) in scoringTiles"
+                  :key="`scoring-${tile}-${index}`"
+                  :type="!isMahjongTileCode(tile) ? 'danger' : index === scoreContext.agariIndex ? 'warning' : 'info'"
+                  effect="plain"
+                >
+                  {{ tile }}
+                </el-tag>
               </el-space>
+
+              <el-text type="info" size="small">计分输入 {{ scoringTiles.length }} 张；赤宝牌：{{ scoringRedDoraCount }}</el-text>
+              <el-text v-if="baselineComparison && baselineComparison.mismatches.length > 0" type="warning" size="small">
+                差异：{{ baselineComparison.mismatches.slice(0, 5).map((item) => `#${item.index}: ${item.expected ?? '∅'} → ${item.actual ?? '∅'}`).join(' / ') }}
+              </el-text>
             </el-card>
 
-            <el-card>
-              <template #header>和牌上下文</template>
-              <el-form label-position="left" label-width="auto">
+            <el-card header="和牌上下文">
+              <el-form label-position="top">
                 <el-row :gutter="16">
                   <el-col :span="12">
                     <el-form-item label="场风">
                       <el-radio-group v-model="scoreContext.fieldWind">
-                        <el-radio-button v-for="option in windOptions" :key="`field-${option.value}`" :value="option.value">{{ option.label }}场</el-radio-button>
+                        <el-radio-button v-for="option in windOptions" :key="`field-${option.value}`" :value="option.value">{{ option.label }}</el-radio-button>
                       </el-radio-group>
                     </el-form-item>
                   </el-col>
                   <el-col :span="12">
                     <el-form-item label="自风">
                       <el-radio-group v-model="scoreContext.seatWind">
-                        <el-radio-button v-for="option in windOptions" :key="`seat-${option.value}`" :value="option.value">{{ option.label }}家</el-radio-button>
+                        <el-radio-button v-for="option in windOptions" :key="`seat-${option.value}`" :value="option.value">{{ option.label }}</el-radio-button>
                       </el-radio-group>
                     </el-form-item>
                   </el-col>
@@ -689,79 +680,73 @@ onUnmounted(() => {
                     </el-form-item>
                   </el-col>
                   <el-col :span="12">
-                    <el-form-item label="和牌索引（0-based）">
-                      <el-input-number v-model="scoreContext.agariIndex" :min="0" :max="Math.max(scoringTiles.length - 1, 0)" />
+                    <el-form-item label="和牌索引">
+                      <el-input-number v-model="scoreContext.agariIndex" :min="0" :max="Math.max(scoringTiles.length - 1, 0)" placeholder="0-based" />
                     </el-form-item>
                   </el-col>
                 </el-row>
 
                 <el-row :gutter="16">
                   <el-col :span="12">
-                    <el-form-item label="宝牌指示牌（逗号分隔，如 3m,7p）">
-                      <el-input v-model="doraIndicatorsInput" placeholder="可留空" clearable />
+                    <el-form-item label="宝牌指示牌">
+                      <el-input v-model="doraIndicatorsInput" placeholder="逗号分隔，如 3m,7p" clearable />
                     </el-form-item>
                   </el-col>
                   <el-col :span="12">
-                    <el-form-item label="里宝牌指示牌（逗号分隔）">
-                      <el-input v-model="uraIndicatorsInput" placeholder="可留空" clearable />
+                    <el-form-item label="里宝牌指示牌">
+                      <el-input v-model="uraIndicatorsInput" placeholder="逗号分隔" clearable />
                     </el-form-item>
                   </el-col>
                 </el-row>
 
                 <el-form-item label="额外状态">
-                  <el-space wrap>
-                    <el-checkbox-button v-model="scoreContext.riichi">立直</el-checkbox-button>
-                    <el-checkbox-button v-model="scoreContext.ippatsu">一发</el-checkbox-button>
-                  </el-space>
+                  <el-checkbox-button v-model="scoreContext.riichi">立直</el-checkbox-button>
+                  <el-checkbox-button v-model="scoreContext.ippatsu">一发</el-checkbox-button>
                 </el-form-item>
               </el-form>
 
               <el-alert :title="readinessMessage" :type="scoring.status === 'incomplete' ? 'warning' : 'success'" :closable="false" show-icon />
             </el-card>
 
-            <el-card>
-              <template #header>和牌计算结果</template>
-              <el-space direction="vertical" fill>
-                <template v-if="scoring.status === 'ready' && scoring.result">
-                  <el-descriptions :column="2" border>
-                    <el-descriptions-item label="番数">{{ scoring.result.han }}</el-descriptions-item>
-                    <el-descriptions-item label="符数">{{ scoring.result.fu }}</el-descriptions-item>
-                    <el-descriptions-item label="点数 1">{{ scoring.result.point1 }}</el-descriptions-item>
-                    <el-descriptions-item label="点数 2">{{ scoring.result.point2 }}</el-descriptions-item>
-                  </el-descriptions>
+            <el-card header="计算结果">
+              <template v-if="scoring.status === 'ready' && scoring.result">
+                <el-descriptions :column="2" border>
+                  <el-descriptions-item label="番数">{{ scoring.result.han }}</el-descriptions-item>
+                  <el-descriptions-item label="符数">{{ scoring.result.fu }}</el-descriptions-item>
+                  <el-descriptions-item label="点数 1">{{ scoring.result.point1 }}</el-descriptions-item>
+                  <el-descriptions-item label="点数 2">{{ scoring.result.point2 }}</el-descriptions-item>
+                </el-descriptions>
 
-                  <el-divider content-position="left">役种</el-divider>
-                  <el-space v-if="scoring.result.yaku.length > 0" wrap>
-                    <el-tag v-for="(yaku, index) in scoring.result.yaku" :key="`${yaku}-${index}`" effect="plain">{{ yaku }}</el-tag>
-                  </el-space>
-                  <el-empty v-else description="没有役种输出。" />
-
-                  <el-alert
-                    v-if="scoring.result.fuMessages.length > 0"
-                    :title="`符说明：${scoring.result.fuMessages.join(' / ')}`"
-                    type="info"
-                    :closable="false"
-                    show-icon
-                  />
-
-                  <el-alert
-                    v-if="scoring.warnings.length > 0"
-                    :title="scoring.warnings.join('；')"
-                    type="warning"
-                    :closable="false"
-                    show-icon
-                  />
-                </template>
-
-                <el-alert v-else :title="scoring.message" type="warning" :closable="false" show-icon />
+                <el-divider content-position="left">役种</el-divider>
+                <el-space v-if="scoring.result.yaku.length > 0" wrap>
+                  <el-tag v-for="(yaku, index) in scoring.result.yaku" :key="`${yaku}-${index}`" effect="plain">{{ yaku }}</el-tag>
+                </el-space>
+                <el-empty v-else description="没有役种输出。" />
 
                 <el-alert
-                  title="限制：Phase 5 仍不自动识别副露、宝牌指示牌、里宝牌、立直信息或桌面完整局况，需人工补录必要上下文。"
+                  v-if="scoring.result.fuMessages.length > 0"
+                  :title="`符说明：${scoring.result.fuMessages.join(' / ')}`"
                   type="info"
                   :closable="false"
                   show-icon
                 />
-              </el-space>
+                <el-alert
+                  v-if="scoring.warnings.length > 0"
+                  :title="scoring.warnings.join('；')"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                />
+              </template>
+
+              <el-alert v-else :title="scoring.message" type="warning" :closable="false" show-icon />
+
+              <el-alert
+                title="限制：不自动识别副露、宝牌指示牌、里宝牌、立直或局况，需人工补录。"
+                type="info"
+                :closable="false"
+                show-icon
+              />
             </el-card>
 
             <el-collapse>
