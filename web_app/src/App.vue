@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { genFileId } from 'element-plus';
+import type { UploadFile, UploadInstance, UploadProps, UploadRawFile } from 'element-plus';
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import DetectionCanvas from './components/DetectionCanvas.vue';
 import { clearRegisteredAssetCaches, registerAssetCacheServiceWorker, type AssetCacheStatus } from './lib/cache';
@@ -7,12 +9,25 @@ import { getBrowserCompatibility, getWebGpuAvailabilityState, isGpuAdapterUnavai
 import { calculateMahjongScore, type AgariType, type ScoreContext, type Wind } from './lib/mahjong';
 import { summarizeModelAssets } from './lib/labels';
 import { loadModelAssets, type ModelAssets } from './lib/manifest';
-import { countRedDora, toOrderedTileLabels, type RecognizedTile } from './lib/tile';
+import { countRedDora, isMahjongTileCode, parseTileInput, toOrderedTileLabels, type RecognizedTile } from './lib/tile';
 import type { InferenceTimings } from './lib/yolo.messages';
 import type { InferenceOutcome, YoloBrowserRunner } from './lib/yolo';
 
+const windOptions: Array<{ label: string; value: Wind }> = [
+  { label: '东', value: 'east' },
+  { label: '南', value: 'south' },
+  { label: '西', value: 'west' },
+  { label: '北', value: 'north' },
+];
+
+const agariTypeOptions: Array<{ label: string; value: AgariType }> = [
+  { label: '荣和', value: 'ron' },
+  { label: '自摸', value: 'tsumo' },
+];
+
 const modelAssets = ref<ModelAssets | null>(null);
 const modelRunner = ref<YoloBrowserRunner | null>(null);
+const uploadRef = ref<UploadInstance | null>(null);
 const selectedModelId = ref('');
 const imageUrl = ref<string | null>(null);
 const selectedFile = ref<File | null>(null);
@@ -33,6 +48,9 @@ const uploadInferenceAttempted = ref(false);
 const cacheStatus = ref<AssetCacheStatus | null>(null);
 const clearingCache = ref(false);
 const uploadDetections = ref<RecognizedTile[]>([]);
+const editableRecommendedHand = ref('');
+const doraIndicatorsInput = ref('');
+const uraIndicatorsInput = ref('');
 const scoreMessage = ref('');
 const compatibility = ref(getBrowserCompatibility());
 
@@ -48,9 +66,12 @@ const scoreContext = reactive<ScoreContext>({
 });
 
 const modelOptions = computed(() => modelAssets.value?.manifest.models ?? []);
-const orderedTiles = computed(() => toOrderedTileLabels(uploadDetections.value));
-const redDoraCount = computed(() => countRedDora(orderedTiles.value));
-const scoring = computed(() => calculateMahjongScore(orderedTiles.value, scoreContext));
+const recommendedTiles = computed(() => toOrderedTileLabels(uploadDetections.value));
+const recommendedHandText = computed(() => recommendedTiles.value.join(' '));
+const scoringTiles = computed(() => parseTileInput(editableRecommendedHand.value));
+const recommendedRedDoraCount = computed(() => countRedDora(recommendedTiles.value));
+const scoringRedDoraCount = computed(() => countRedDora(scoringTiles.value));
+const scoring = computed(() => calculateMahjongScore(scoringTiles.value, scoreContext));
 const inferenceSupported = computed(() => compatibility.value.inferenceSupported);
 const browserBlockingMessage = computed(() => compatibility.value.blockingIssues.join('；'));
 const compatibilityNotices = computed(() =>
@@ -157,23 +178,35 @@ const uploadEmptyMessage = computed(() => {
   return '';
 });
 const readinessMessage = computed(() => {
-  if (orderedTiles.value.length === 0) {
-    return '还没有识别到可计算的牌。';
+  if (scoringTiles.value.length === 0) {
+    return '还没有可用于计分的手牌。';
   }
 
   return scoring.value.message;
 });
 const modelInfo = computed(() => (modelAssets.value ? summarizeModelAssets(modelAssets.value) : null));
-
+const rawDetectionPayload = computed(() =>
+  uploadDetections.value.map((detection) => ({
+    [detection.label]: [
+      Number(detection.confidence.toFixed(3)),
+      detection.bbox.map((value) => Number(value.toFixed(1))),
+      [Number(detection.centerX.toFixed(1)), Number(detection.centerY.toFixed(1))],
+    ],
+  })),
+);
+const rawDetectionText = computed(() => JSON.stringify(rawDetectionPayload.value, null, 2));
 const matchedBaseline = computed(() => findBaselineSample(selectedImageName.value, modelAssets.value));
-
 const baselineComparison = computed(() => {
   if (!uploadInferenceAttempted.value || !matchedBaseline.value) {
     return null;
   }
 
-  return compareWithBaseline(orderedTiles.value, matchedBaseline.value);
+  return compareWithBaseline(recommendedTiles.value, matchedBaseline.value);
 });
+const canRunInference = computed(() =>
+  Boolean(imageUrl.value) && !runningInference.value && !loadingAssets.value && !preparingModel.value && inferenceSupported.value,
+);
+const canResetUpload = computed(() => Boolean(imageUrl.value) || uploadDetections.value.length > 0);
 
 function parseIndicatorList(value: string): string[] {
   return value
@@ -182,7 +215,11 @@ function parseIndicatorList(value: string): string[] {
     .filter(Boolean);
 }
 
-watch(orderedTiles, (tiles, previousTiles) => {
+watch(recommendedHandText, (nextValue) => {
+  editableRecommendedHand.value = nextValue;
+}, { immediate: true });
+
+watch(scoringTiles, (tiles, previousTiles) => {
   if (tiles.length === 0) {
     scoreContext.agariIndex = 0;
     return;
@@ -196,6 +233,14 @@ watch(orderedTiles, (tiles, previousTiles) => {
   scoreContext.agariIndex = Math.min(scoreContext.agariIndex, tiles.length - 1);
 });
 
+watch(doraIndicatorsInput, (value) => {
+  scoreContext.doraIndicators = parseIndicatorList(value);
+}, { immediate: true });
+
+watch(uraIndicatorsInput, (value) => {
+  scoreContext.uraIndicators = parseIndicatorList(value);
+}, { immediate: true });
+
 function applyInferenceOutcome(outcome: InferenceOutcome) {
   uploadInferenceAttempted.value = true;
   uploadDetections.value = outcome.detections;
@@ -203,7 +248,7 @@ function applyInferenceOutcome(outcome: InferenceOutcome) {
     outcome.backend === 'webgpu'
       ? `上传图片推理已在 Web Worker 中通过 WebGPU 完成，当前模型为 ${activeModelLabel.value}。`
       : `上传图片推理当前来自 Web Worker 内的 WASM 回退路径，当前模型为 ${activeModelLabel.value}。`;
-  scoreMessage.value = `识别完成：${outcome.detections.length} 个框，画布展示全部检测框；已按主排从左到右提取 ${toOrderedTileLabels(outcome.detections).length} 张牌。`;
+  scoreMessage.value = `识别完成：${outcome.detections.length} 个框；画布与原始检测明细展示全部后处理检测，最可能手牌推荐默认已写入可编辑计分输入。`;
   backendUsed.value = outcome.backend;
   backendFallbackReason.value = outcome.fallbackReason;
   outputShape.value = outcome.rawShape;
@@ -314,47 +359,72 @@ async function clearAssetCache() {
   }
 }
 
-async function onModelChange(event: Event) {
-  const nextModelId = (event.target as HTMLSelectElement).value;
-  if (!nextModelId || nextModelId === selectedModelId.value) {
+async function onModelChange(nextModelId: string) {
+  if (!nextModelId || nextModelId === modelAssets.value?.manifest.activeModel.id) {
+    return;
+  }
+
+  const previousModelId = modelAssets.value?.manifest.activeModel.id ?? selectedModelId.value;
+  statusMessage.value = '正在切换模型...';
+
+  const loaded = await loadAssetsMetadata(nextModelId);
+  if (!loaded) {
+    selectedModelId.value = previousModelId;
+    statusMessage.value = modelAssets.value
+      ? `模型切换失败，当前仍使用 ${modelAssets.value.manifest.activeModel.label}。`
+      : '模型切换失败，请稍后重试。';
     return;
   }
 
   resetModelSession();
   uploadInferenceAttempted.value = false;
   uploadDetections.value = [];
+  editableRecommendedHand.value = '';
   inferenceError.value = null;
   scoreMessage.value = '';
-  statusMessage.value = '正在切换模型...';
-
-  const loaded = await loadAssetsMetadata(nextModelId);
-  if (loaded && modelAssets.value) {
+  if (modelAssets.value) {
     statusMessage.value = `已切换到 ${modelAssets.value.manifest.activeModel.label}，请重新运行推理。`;
   }
 }
 
-function onFileChange(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) {
-    return;
-  }
-
+function applySelectedFile(file: File, fileName: string) {
   if (imageUrl.value) {
     URL.revokeObjectURL(imageUrl.value);
   }
 
   imageUrl.value = URL.createObjectURL(file);
   selectedFile.value = file;
-  selectedFileName.value = file.name;
-  selectedImageName.value = file.name;
+  selectedFileName.value = fileName;
+  selectedImageName.value = fileName;
   uploadInferenceAttempted.value = false;
   uploadDetections.value = [];
+  editableRecommendedHand.value = '';
   inferenceError.value = null;
   outputShape.value = [];
   timingMetrics.value = null;
   scoreMessage.value = '';
 }
+
+function onFileChange(uploadFile: UploadFile) {
+  const file = uploadFile.raw;
+  if (!file) {
+    return;
+  }
+
+  applySelectedFile(file, uploadFile.name);
+}
+
+const onFileExceed: UploadProps['onExceed'] = (files) => {
+  const replacementFile = files[0] as UploadRawFile | undefined;
+  if (!replacementFile) {
+    return;
+  }
+
+  uploadRef.value?.clearFiles();
+  replacementFile.uid = genFileId();
+  uploadRef.value?.handleStart(replacementFile);
+  applySelectedFile(replacementFile, replacementFile.name);
+};
 
 async function runInference() {
   if (!selectedFile.value) {
@@ -378,6 +448,7 @@ async function runInference() {
     applyInferenceOutcome(outcome);
   } catch (error) {
     inferenceError.value = error instanceof Error ? error.message : '推理失败';
+    statusMessage.value = '推理失败，请稍后重试。';
   } finally {
     runningInference.value = false;
   }
@@ -394,6 +465,8 @@ function resetUpload() {
   selectedImageName.value = '';
   uploadInferenceAttempted.value = false;
   uploadDetections.value = [];
+  uploadRef.value?.clearFiles();
+  editableRecommendedHand.value = '';
   inferenceError.value = null;
   outputShape.value = [];
   timingMetrics.value = null;
@@ -408,30 +481,6 @@ function resetUpload() {
 
 function formatTiming(value: number): string {
   return `${value.toFixed(1)} ms`;
-}
-
-function updateFieldWind(event: Event) {
-  scoreContext.fieldWind = (event.target as HTMLSelectElement).value as Wind;
-}
-
-function updateSeatWind(event: Event) {
-  scoreContext.seatWind = (event.target as HTMLSelectElement).value as Wind;
-}
-
-function updateAgariType(event: Event) {
-  scoreContext.agariType = (event.target as HTMLSelectElement).value as AgariType;
-}
-
-function updateAgariIndex(event: Event) {
-  scoreContext.agariIndex = Number((event.target as HTMLInputElement).value);
-}
-
-function updateDoraIndicators(event: Event) {
-  scoreContext.doraIndicators = parseIndicatorList((event.target as HTMLInputElement).value);
-}
-
-function updateUraIndicators(event: Event) {
-  scoreContext.uraIndicators = parseIndicatorList((event.target as HTMLInputElement).value);
 }
 
 onMounted(() => {
@@ -449,311 +498,273 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
-      <h1>Mahjong YOLO Phase 5 Web App</h1>
-      <p>当前阶段保留上传推理、基线比对与麻将计分能力，已移除实时摄像头识别路径，并支持在多个 ONNX 模型之间切换。</p>
-      <div class="status-banner">{{ statusMessage }}</div>
-    </header>
+  <div style="height: 100vh;">
+    <el-splitter style="height: 100%;">
+      <el-splitter-panel size="68%" min="420">
+        <el-scrollbar height="100%">
+          <el-space direction="vertical" fill size="large">
+            <el-space wrap>
+              <el-select
+                v-if="modelOptions.length > 0"
+                v-model="selectedModelId"
+                style="width: 240px;"
+                :disabled="loadingAssets || preparingModel || runningInference"
+                @change="onModelChange"
+              >
+                <el-option v-for="model in modelOptions" :key="model.id" :label="model.label" :value="model.id" />
+              </el-select>
+              <el-button type="primary" :disabled="!canRunInference" @click="runInference">
+                {{ runningInference ? '推理中...' : preparingModel ? '初始化中...' : '运行 YOLO 推理' }}
+              </el-button>
+              <el-button :disabled="!canResetUpload" @click="resetUpload">清空</el-button>
+              <el-tag v-if="selectedFileName" type="info" effect="plain">{{ selectedFileName }}</el-tag>
+            </el-space>
 
-    <div class="layout">
-      <section>
-        <div class="panel">
-          <h2>图片上传与推理</h2>
-          <div class="upload-row">
-            <input type="file" accept="image/*" @change="onFileChange" />
-            <span v-if="selectedFileName">当前图片：{{ selectedFileName }}</span>
-          </div>
-
-          <div v-if="modelOptions.length > 0" class="form-grid">
-            <label class="field full">
-              <span>推理模型</span>
-              <select :value="selectedModelId" :disabled="loadingAssets || preparingModel || runningInference" @change="onModelChange">
-                <option v-for="model in modelOptions" :key="model.id" :value="model.id">
-                  {{ model.label }}
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <div class="action-row">
-            <button :disabled="!imageUrl || runningInference || loadingAssets || preparingModel || !inferenceSupported" @click="runInference">
-              {{ runningInference ? '推理中...' : preparingModel ? '初始化中...' : '运行 YOLO 推理' }}
-            </button>
-            <button class="secondary" :disabled="!imageUrl && uploadDetections.length === 0" @click="resetUpload">清空</button>
-          </div>
-
-          <div v-if="uploadEmptyMessage" class="message">{{ uploadEmptyMessage }}</div>
-
-          <div class="meta-grid">
-            <div class="meta-item">
-              <span class="meta-label">模型准备</span>
-              {{ modelPreparationLabel }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">当前执行路径</span>
-              {{ executionPathLabel }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">WebGPU 能力</span>
-              {{ webGpuCapabilityLabel }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">静态缓存</span>
-              {{ cacheStatus?.enabled ? 'Service Worker 已启用' : '未启用 SW 缓存' }}
-            </div>
-          </div>
-
-          <div class="message">{{ modelLifecycleMessage }}</div>
-          <div class="message">{{ cacheStatusMessage }}</div>
-          <div class="action-row compact">
-            <button class="secondary" :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
-              {{ clearingCache ? '清理中...' : '清理静态缓存' }}
-            </button>
-          </div>
-
-          <div v-if="browserBlockingMessage" class="message warning">当前浏览器环境不满足推理要求：{{ browserBlockingMessage }}</div>
-          <div v-else-if="compatibilityNotices.length > 0" class="message">
-            <strong>兼容性提示</strong>
-            <ul class="result-list">
-              <li v-for="notice in compatibilityNotices" :key="notice">
-                {{ notice }}
-              </li>
-            </ul>
-          </div>
-
-          <div v-if="assetError" class="message warning">模型资源初始化失败：{{ assetError }}</div>
-          <div v-if="inferenceError" class="message warning">推理失败：{{ inferenceError }}</div>
-          <div v-if="scoreMessage" class="message">{{ scoreMessage }}</div>
-
-          <div v-if="modelInfo" class="meta-grid">
-            <div class="meta-item">
-              <span class="meta-label">当前模型</span>
-              {{ modelInfo.model }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">模型文件</span>
-              {{ modelInfo.modelFile }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">输入尺寸</span>
-              {{ modelInfo.inputSize }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">类别数</span>
-              {{ modelInfo.classCount }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">阈值</span>
-              conf={{ modelInfo.confidence }}, iou={{ modelInfo.iou }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">后端</span>
-              {{ backendUsed ?? '未运行' }}
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">执行线程</span>
-              Web Worker
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">输出形状</span>
-              {{ outputShape.length > 0 ? JSON.stringify(outputShape) : '未返回' }}
-            </div>
-          </div>
-
-          <div v-if="timingMetrics" class="meta-grid">
-            <div class="meta-item metric-item">
-              <span class="meta-label">预处理</span>
-              <span class="metric-value">{{ formatTiming(timingMetrics.preprocessMs) }}</span>
-              <span class="meta-helper">worker 内图像 letterbox 与 tensor 化</span>
-            </div>
-            <div class="meta-item metric-item">
-              <span class="meta-label">模型推理</span>
-              <span class="metric-value">{{ formatTiming(timingMetrics.inferenceMs) }}</span>
-              <span class="meta-helper">ONNX Runtime Web 执行耗时</span>
-            </div>
-            <div class="meta-item metric-item">
-              <span class="meta-label">后处理</span>
-              <span class="metric-value">{{ formatTiming(timingMetrics.postprocessMs) }}</span>
-              <span class="meta-helper">decode / 阈值过滤 / NMS</span>
-            </div>
-            <div class="meta-item metric-item">
-              <span class="meta-label">总耗时</span>
-              <span class="metric-value">{{ formatTiming(timingMetrics.totalMs) }}</span>
-              <span class="meta-helper">不含主线程绘制时间</span>
-            </div>
-          </div>
-
-          <div v-if="backendFallbackReason" class="message warning">
-            <template v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
-              浏览器已暴露 WebGPU API，但当前环境没有返回可用 GPU adapter，应用已回退到 WASM：{{ backendFallbackReason }}
-            </template>
-            <template v-else>
-              WebGPU 未能在 worker 中启用，当前已回退到 WASM：{{ backendFallbackReason }}
-            </template>
-          </div>
-
-          <div v-if="orderedTiles.length > 0" class="message">
-            当前结果来自上传图片。画布显示全部后处理检测框；计分与基线比对仍沿用单排手牌假设，并按检测框中心点从左到右排序主排结果。
-          </div>
-
-          <div v-if="baselineComparison" class="message" :class="{ warning: !baselineComparison.exactMatch }">
-            <template v-if="baselineComparison.exactMatch">
-              基线比对通过：{{ baselineComparison.sample.imageName }} 的识别序列与当前内置基线一致。
-            </template>
-            <template v-else>
-              基线比对未通过：当前 {{ baselineComparison.actualCount }} 张，基线 {{ baselineComparison.expectedCount }} 张，差异 {{ baselineComparison.mismatches.length }} 处。
-            </template>
-          </div>
-        </div>
-
-        <DetectionCanvas :image-url="imageUrl" :detections="uploadDetections" />
-
-        <div class="panel">
-          <h2>识别到的牌</h2>
-          <p>
-            当前来源：上传图片，共识别 {{ orderedTiles.length }} 张牌。当前只支持 <strong>14 张闭门手牌</strong>
-            的最小和牌计算。
-          </p>
-          <div class="tile-list">
-            <span
-              v-for="(tile, index) in orderedTiles"
-              :key="`${tile}-${index}`"
-              class="tile-chip"
-              :class="{
-                unknown: !/^(?:[1-9]|0)[mpsz]$/.test(tile),
-                agari: index === scoreContext.agariIndex,
-              }"
+            <el-upload
+              ref="uploadRef"
+              drag
+              :auto-upload="false"
+              :show-file-list="false"
+              :limit="1"
+              accept="image/*"
+              :on-change="onFileChange"
+              :on-exceed="onFileExceed"
             >
-              {{ tile }}
-            </span>
-          </div>
-          <div class="footnote">赤宝牌计数（按 0m/0p/0s 自动统计）：{{ redDoraCount }}</div>
-          <div class="footnote">当前模型文件：{{ activeModelFile }}</div>
-          <div v-if="baselineComparison && baselineComparison.mismatches.length > 0" class="footnote">
-            基线差异：
-            {{ baselineComparison.mismatches.slice(0, 5).map((item) => `#${item.index}: ${item.expected ?? '∅'} → ${item.actual ?? '∅'}`).join(' / ') }}
-          </div>
-        </div>
-      </section>
+              <div>拖拽图片到这里，或点击选择</div>
+              <div>支持单张麻将手牌图片；上传后可直接预览并运行推理。</div>
+            </el-upload>
 
-      <aside>
-        <div class="panel">
-          <h2>和牌上下文</h2>
-          <div class="form-grid">
-            <label class="field">
-              <span>场风</span>
-              <select :value="scoreContext.fieldWind" @change="updateFieldWind">
-                <option value="east">东场</option>
-                <option value="south">南场</option>
-                <option value="west">西场</option>
-                <option value="north">北场</option>
-              </select>
-            </label>
+            <DetectionCanvas :image-url="imageUrl" :detections="uploadDetections" />
+          </el-space>
+        </el-scrollbar>
+      </el-splitter-panel>
 
-            <label class="field">
-              <span>自风</span>
-              <select :value="scoreContext.seatWind" @change="updateSeatWind">
-                <option value="east">东家</option>
-                <option value="south">南家</option>
-                <option value="west">西家</option>
-                <option value="north">北家</option>
-              </select>
-            </label>
+      <el-splitter-panel size="32%" min="320">
+        <el-scrollbar height="100%">
+          <el-space direction="vertical" fill size="large">
+            <el-card>
+              <template #header>状态与结果</template>
+              <el-space direction="vertical" fill>
+                <el-alert v-if="uploadEmptyMessage" :title="uploadEmptyMessage" type="info" :closable="false" show-icon />
 
-            <label class="field">
-              <span>和牌方式</span>
-              <select :value="scoreContext.agariType" @change="updateAgariType">
-                <option value="ron">荣和</option>
-                <option value="tsumo">自摸</option>
-              </select>
-            </label>
+                <el-descriptions :column="2" border>
+                  <el-descriptions-item label="模型准备">{{ modelPreparationLabel }}</el-descriptions-item>
+                  <el-descriptions-item label="当前执行路径">{{ executionPathLabel }}</el-descriptions-item>
+                  <el-descriptions-item label="WebGPU 能力">{{ webGpuCapabilityLabel }}</el-descriptions-item>
+                  <el-descriptions-item label="静态缓存">{{ cacheStatus?.enabled ? 'Service Worker 已启用' : '未启用 SW 缓存' }}</el-descriptions-item>
+                </el-descriptions>
 
-            <label class="field">
-              <span>和牌索引（0-based）</span>
-              <input
-                type="number"
-                min="0"
-                :max="Math.max(orderedTiles.length - 1, 0)"
-                :value="scoreContext.agariIndex"
-                @input="updateAgariIndex"
-              />
-            </label>
+                <el-alert :title="modelLifecycleMessage" type="info" :closable="false" show-icon />
+                <el-alert :title="cacheStatusMessage" type="info" :closable="false" show-icon />
 
-            <label class="field full">
-              <span>宝牌指示牌（逗号分隔，如 3m,7p）</span>
-              <input type="text" @input="updateDoraIndicators" placeholder="可留空" />
-            </label>
+                <el-button :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
+                  {{ clearingCache ? '清理中...' : '清理静态缓存' }}
+                </el-button>
 
-            <label class="field full">
-              <span>里宝牌指示牌（逗号分隔）</span>
-              <input type="text" @input="updateUraIndicators" placeholder="可留空" />
-            </label>
+                <el-alert v-if="browserBlockingMessage" :title="`当前浏览器环境不满足推理要求：${browserBlockingMessage}`" type="warning" :closable="false" show-icon />
+                <el-alert v-else-if="compatibilityNotices.length > 0" type="info" :closable="false" show-icon>
+                  <template #title>兼容性提示</template>
+                  <ul>
+                    <li v-for="notice in compatibilityNotices" :key="notice">{{ notice }}</li>
+                  </ul>
+                </el-alert>
 
-            <div class="field full">
-              <span>额外状态</span>
-              <div class="checkbox-row">
-                <label>
-                  <input v-model="scoreContext.riichi" type="checkbox" />
-                  立直
-                </label>
-                <label>
-                  <input v-model="scoreContext.ippatsu" type="checkbox" />
-                  一发
-                </label>
-              </div>
-            </div>
-          </div>
+                <el-alert v-if="assetError" :title="`模型资源初始化失败：${assetError}`" type="warning" :closable="false" show-icon />
+                <el-alert v-if="inferenceError" :title="`推理失败：${inferenceError}`" type="warning" :closable="false" show-icon />
+                <el-alert v-if="scoreMessage" :title="scoreMessage" type="success" :closable="false" show-icon />
 
-          <div class="message" :class="{ warning: scoring.status === 'incomplete' }">
-            {{ readinessMessage }}
-          </div>
-        </div>
+                <el-descriptions v-if="modelInfo" :column="2" border>
+                  <el-descriptions-item label="当前模型">{{ modelInfo.model }}</el-descriptions-item>
+                  <el-descriptions-item label="模型文件">{{ modelInfo.modelFile }}</el-descriptions-item>
+                  <el-descriptions-item label="输入尺寸">{{ modelInfo.inputSize }}</el-descriptions-item>
+                  <el-descriptions-item label="类别数">{{ modelInfo.classCount }}</el-descriptions-item>
+                  <el-descriptions-item label="阈值">conf={{ modelInfo.confidence }}, iou={{ modelInfo.iou }}</el-descriptions-item>
+                  <el-descriptions-item label="后端">{{ backendUsed ?? '未运行' }}</el-descriptions-item>
+                  <el-descriptions-item label="执行线程">Web Worker</el-descriptions-item>
+                  <el-descriptions-item label="输出形状">{{ outputShape.length > 0 ? JSON.stringify(outputShape) : '未返回' }}</el-descriptions-item>
+                </el-descriptions>
 
-        <div class="panel">
-          <h2>和牌计算结果</h2>
-          <template v-if="scoring.status === 'ready' && scoring.result">
-            <div class="meta-grid">
-              <div class="meta-item">
-                <span class="meta-label">番数</span>
-                {{ scoring.result.han }}
-              </div>
-              <div class="meta-item">
-                <span class="meta-label">符数</span>
-                {{ scoring.result.fu }}
-              </div>
-              <div class="meta-item">
-                <span class="meta-label">点数 1</span>
-                {{ scoring.result.point1 }}
-              </div>
-              <div class="meta-item">
-                <span class="meta-label">点数 2</span>
-                {{ scoring.result.point2 }}
-              </div>
-            </div>
+                <el-descriptions v-if="timingMetrics" :column="2" border>
+                  <el-descriptions-item label="预处理">{{ formatTiming(timingMetrics.preprocessMs) }}；worker 内图像 letterbox 与 tensor 化</el-descriptions-item>
+                  <el-descriptions-item label="模型推理">{{ formatTiming(timingMetrics.inferenceMs) }}；ONNX Runtime Web 执行耗时</el-descriptions-item>
+                  <el-descriptions-item label="后处理">{{ formatTiming(timingMetrics.postprocessMs) }}；decode / 阈值过滤 / NMS</el-descriptions-item>
+                  <el-descriptions-item label="总耗时">{{ formatTiming(timingMetrics.totalMs) }}；不含主线程绘制时间</el-descriptions-item>
+                </el-descriptions>
 
-            <h3>役种</h3>
-            <ul class="result-list">
-              <li v-for="(yaku, index) in scoring.result.yaku" :key="`${yaku}-${index}`">
-                {{ yaku }}
-              </li>
-            </ul>
+                <el-alert v-if="backendFallbackReason" type="warning" :closable="false" show-icon>
+                  <template #title>
+                    <span v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
+                      浏览器已暴露 WebGPU API，但当前环境没有返回可用 GPU adapter，应用已回退到 WASM：{{ backendFallbackReason }}
+                    </span>
+                    <span v-else>WebGPU 未能在 worker 中启用，当前已回退到 WASM：{{ backendFallbackReason }}</span>
+                  </template>
+                </el-alert>
+              </el-space>
+            </el-card>
 
-            <div v-if="scoring.result.fuMessages.length > 0" class="footnote">符说明：{{ scoring.result.fuMessages.join(' / ') }}</div>
-            <div v-if="scoring.warnings.length > 0" class="message warning">
-              {{ scoring.warnings.join('；') }}
-            </div>
-          </template>
+            <el-card>
+              <template #header>最可能手牌推荐</template>
+              <el-space direction="vertical" fill>
+                <p>当前来源：上传图片，共保留 {{ uploadDetections.length }} 个后处理检测框。这里给出最可能手牌推荐，并允许你手动编辑后再用于计分。</p>
 
-          <template v-else>
-            <div class="message warning">
-              {{ scoring.message }}
-            </div>
-          </template>
+                <el-alert
+                  v-if="uploadDetections.length > 0"
+                  title="当前结果来自上传图片。画布与左侧原始检测明细展示全部后处理检测；“最可能手牌推荐”沿用现有单排 heuristic，仅作为默认计分输入与基线比对依据。"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                />
 
-          <div class="footnote">限制：Phase 5 仍不自动识别副露、宝牌指示牌、里宝牌、立直信息或桌面完整局况，需人工补录必要上下文。</div>
-        </div>
-      </aside>
-    </div>
+                <el-alert
+                  v-if="baselineComparison"
+                  :title="baselineComparison.exactMatch
+                    ? `基线比对通过：${baselineComparison.sample.imageName} 的识别序列与当前内置基线一致。`
+                    : `基线比对未通过：当前 ${baselineComparison.actualCount} 张，基线 ${baselineComparison.expectedCount} 张，差异 ${baselineComparison.mismatches.length} 处。`"
+                  :type="baselineComparison.exactMatch ? 'success' : 'warning'"
+                  :closable="false"
+                  show-icon
+                />
+
+                <el-empty v-if="recommendedTiles.length === 0" description="当前还没有可推荐的手牌序列。" />
+                <template v-else>
+                  <el-space wrap>
+                    <el-tag
+                      v-for="(tile, index) in recommendedTiles"
+                      :key="`recommended-${tile}-${index}`"
+                      :type="isMahjongTileCode(tile) ? 'info' : 'danger'"
+                      effect="plain"
+                    >
+                      {{ tile }}
+                    </el-tag>
+                  </el-space>
+                  <p>推荐序列赤宝牌计数（按 0m/0p/0s 自动统计）：{{ recommendedRedDoraCount }}</p>
+                </template>
+
+                <el-form label-position="top">
+                  <el-form-item label="用于计分的手牌（默认取自推荐结果，可编辑；支持空格、逗号、换行或列表样式）">
+                    <el-input v-model="editableRecommendedHand" type="textarea" :rows="5" />
+                  </el-form-item>
+                </el-form>
+
+                <el-space v-if="scoringTiles.length > 0" wrap>
+                  <el-tag
+                    v-for="(tile, index) in scoringTiles"
+                    :key="`scoring-${tile}-${index}`"
+                    :type="!isMahjongTileCode(tile) ? 'danger' : index === scoreContext.agariIndex ? 'warning' : 'info'"
+                    effect="plain"
+                  >
+                    {{ tile }}
+                  </el-tag>
+                </el-space>
+
+                <p>当前计分输入共 {{ scoringTiles.length }} 张；赤宝牌计数：{{ scoringRedDoraCount }}</p>
+                <p>当前模型文件：{{ activeModelFile }}</p>
+                <p v-if="baselineComparison && baselineComparison.mismatches.length > 0">
+                  基线差异（基于自动推荐序列）：
+                  {{ baselineComparison.mismatches.slice(0, 5).map((item) => `#${item.index}: ${item.expected ?? '∅'} → ${item.actual ?? '∅'}`).join(' / ') }}
+                </p>
+              </el-space>
+            </el-card>
+
+            <el-card>
+              <template #header>和牌上下文</template>
+              <el-form label-position="top">
+                <el-form-item label="场风">
+                  <el-select v-model="scoreContext.fieldWind">
+                    <el-option v-for="option in windOptions" :key="`field-${option.value}`" :label="`${option.label}场`" :value="option.value" />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item label="自风">
+                  <el-select v-model="scoreContext.seatWind">
+                    <el-option v-for="option in windOptions" :key="`seat-${option.value}`" :label="`${option.label}家`" :value="option.value" />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item label="和牌方式">
+                  <el-select v-model="scoreContext.agariType">
+                    <el-option v-for="option in agariTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item label="和牌索引（0-based）">
+                  <el-input-number v-model="scoreContext.agariIndex" :min="0" :max="Math.max(scoringTiles.length - 1, 0)" />
+                </el-form-item>
+
+                <el-form-item label="宝牌指示牌（逗号分隔，如 3m,7p）">
+                  <el-input v-model="doraIndicatorsInput" placeholder="可留空" clearable />
+                </el-form-item>
+
+                <el-form-item label="里宝牌指示牌（逗号分隔）">
+                  <el-input v-model="uraIndicatorsInput" placeholder="可留空" clearable />
+                </el-form-item>
+
+                <el-form-item label="额外状态">
+                  <el-space wrap>
+                    <el-checkbox v-model="scoreContext.riichi">立直</el-checkbox>
+                    <el-checkbox v-model="scoreContext.ippatsu">一发</el-checkbox>
+                  </el-space>
+                </el-form-item>
+              </el-form>
+
+              <el-alert :title="readinessMessage" :type="scoring.status === 'incomplete' ? 'warning' : 'success'" :closable="false" show-icon />
+            </el-card>
+
+            <el-card>
+              <template #header>和牌计算结果</template>
+              <el-space direction="vertical" fill>
+                <template v-if="scoring.status === 'ready' && scoring.result">
+                  <el-descriptions :column="2" border>
+                    <el-descriptions-item label="番数">{{ scoring.result.han }}</el-descriptions-item>
+                    <el-descriptions-item label="符数">{{ scoring.result.fu }}</el-descriptions-item>
+                    <el-descriptions-item label="点数 1">{{ scoring.result.point1 }}</el-descriptions-item>
+                    <el-descriptions-item label="点数 2">{{ scoring.result.point2 }}</el-descriptions-item>
+                  </el-descriptions>
+
+                  <el-divider content-position="left">役种</el-divider>
+                  <el-space v-if="scoring.result.yaku.length > 0" wrap>
+                    <el-tag v-for="(yaku, index) in scoring.result.yaku" :key="`${yaku}-${index}`" effect="plain">{{ yaku }}</el-tag>
+                  </el-space>
+                  <el-empty v-else description="没有役种输出。" />
+
+                  <el-alert
+                    v-if="scoring.result.fuMessages.length > 0"
+                    :title="`符说明：${scoring.result.fuMessages.join(' / ')}`"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                  />
+
+                  <el-alert
+                    v-if="scoring.warnings.length > 0"
+                    :title="scoring.warnings.join('；')"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                  />
+                </template>
+
+                <el-alert v-else :title="scoring.message" type="warning" :closable="false" show-icon />
+
+                <el-alert
+                  title="限制：Phase 5 仍不自动识别副露、宝牌指示牌、里宝牌、立直信息或桌面完整局况，需人工补录必要上下文。"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                />
+              </el-space>
+            </el-card>
+
+            <el-card>
+              <template #header>原始检测明细</template>
+              <el-space direction="vertical" fill>
+                <el-empty v-if="rawDetectionPayload.length === 0" description="运行推理后，这里会列出每个检测框的分类、置信度、坐标和中心点信息。" />
+                <el-input v-else :model-value="rawDetectionText" type="textarea" :rows="10" readonly />
+              </el-space>
+            </el-card>
+          </el-space>
+        </el-scrollbar>
+      </el-splitter-panel>
+    </el-splitter>
   </div>
 </template>

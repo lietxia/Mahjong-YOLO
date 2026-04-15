@@ -16,10 +16,9 @@ const palette = computed(() => createLabelPalette(props.detections.map((detectio
 let animationFrameId = 0;
 
 function getCanvasColors() {
-  const styles = getComputedStyle(document.documentElement);
   return {
-    placeholder: styles.getPropertyValue('--color-text-muted').trim() || '#6b7280',
-    labelText: styles.getPropertyValue('--color-white').trim() || '#ffffff',
+    placeholder: '#909399',
+    labelText: '#ffffff',
   };
 }
 
@@ -164,18 +163,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="panel">
-    <h2>实时检测画面</h2>
-    <p v-if="!stream">{{ placeholderMessage }}</p>
-    <video ref="videoRef" class="hidden-video" autoplay muted playsinline></video>
-    <div class="canvas-wrapper">
-      <canvas ref="canvasRef"></canvas>
-    </div>
-  </div>
+  <el-card>
+    <template #header>实时检测画面</template>
+    <el-space direction="vertical" fill>
+      <p v-if="!stream">{{ placeholderMessage }}</p>
+      <video ref="videoRef" hidden autoplay muted playsinline></video>
+      <el-scrollbar>
+        <canvas ref="canvasRef"></canvas>
+      </el-scrollbar>
+    </el-space>
+  </el-card>
 </template>
-
-<style scoped>
-.hidden-video {
-  display: none;
-}
-</style>

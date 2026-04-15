@@ -5,7 +5,16 @@ export type RecognizedTile = {
   bbox: [number, number, number, number];
   centerX: number;
   centerY: number;
+  rotationDegrees?: number | null;
 };
+
+export function parseTileInput(value: string): string[] {
+  return value
+    .replace(/[\[\]"']/g, ' ')
+    .split(/[\s,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 export function isMahjongTileCode(label: string): boolean {
   return /^(?:[1-9]|0)[mpsz]$/.test(label);

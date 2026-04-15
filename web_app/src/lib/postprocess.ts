@@ -27,6 +27,7 @@ export function decodeOutput(output: ort.Tensor, meta: LetterboxMeta, assets: Mo
       bbox,
       centerX,
       centerY,
+      rotationDegrees: null,
     } satisfies RecognizedTile;
   });
 }

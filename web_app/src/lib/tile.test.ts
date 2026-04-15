@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countRedDora, hasUnsupportedTiles, selectPrimaryHorizontalRow, sortTilesLeftToRight, type RecognizedTile } from './tile';
+import { countRedDora, hasUnsupportedTiles, parseTileInput, selectPrimaryHorizontalRow, sortTilesLeftToRight, type RecognizedTile } from './tile';
 
 describe('tile helpers', () => {
   it('sorts detections by horizontal order', () => {
@@ -41,5 +41,9 @@ describe('tile helpers', () => {
   it('detects unsupported labels', () => {
     expect(hasUnsupportedTiles(['1m', 'UNKNOWN'])).toBe(true);
     expect(hasUnsupportedTiles(['1m', '9s'])).toBe(false);
+  });
+
+  it('parses editable hand input from whitespace, commas and list-like text', () => {
+    expect(parseTileInput('["1m", 2m，3m\n4p]')).toEqual(['1m', '2m', '3m', '4p']);
   });
 });

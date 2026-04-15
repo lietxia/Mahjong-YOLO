@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { ElMessageBox } from 'element-plus';
+import { computed, h, onMounted, ref, watch } from 'vue';
 import type { RecognizedTile } from '../lib/tile';
 import { createLabelPalette, getLabelColor } from '../lib/labels';
 
@@ -14,10 +15,9 @@ const hasContent = computed(() => Boolean(props.imageUrl));
 const palette = computed(() => createLabelPalette(props.detections.map((detection) => detection.label)));
 
 function getCanvasColors() {
-  const styles = getComputedStyle(document.documentElement);
   return {
-    placeholder: styles.getPropertyValue('--color-text-muted').trim() || '#6b7280',
-    labelText: styles.getPropertyValue('--color-white').trim() || '#ffffff',
+    placeholder: '#909399',
+    labelText: '#ffffff',
   };
 }
 
@@ -69,16 +69,52 @@ function draw() {
   image.src = props.imageUrl;
 }
 
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  });
+}
+
+async function openPreview() {
+  const canvas = canvasRef.value;
+  if (!props.imageUrl || !canvas || canvas.width === 0 || canvas.height === 0) {
+    return;
+  }
+
+  const previewBlob = await canvasToBlob(canvas);
+  if (!previewBlob) {
+    return;
+  }
+
+  const previewUrl = URL.createObjectURL(previewBlob);
+
+  void ElMessageBox({
+    title: '检测结果预览',
+    message: h('img', {
+      src: previewUrl,
+      alt: '检测结果预览',
+      style: 'display:block;max-width:min(88vw,1200px);max-height:75vh;width:auto;height:auto;margin:0 auto;',
+    }),
+    confirmButtonText: '关闭',
+    closeOnClickModal: true,
+    closeOnPressEscape: true,
+    beforeClose: (_action, _instance, done) => {
+      URL.revokeObjectURL(previewUrl);
+      done();
+    },
+  }).catch(() => undefined);
+}
+
 onMounted(draw);
-watch(() => [props.imageUrl, props.detections], draw, { deep: true });
+watch(() => [props.imageUrl, props.detections], draw, { deep: true, flush: 'post' });
 </script>
 
 <template>
-  <div class="panel">
-    <h2>检测结果</h2>
-    <p v-if="!hasContent">选择图片并触发推理后，会在这里叠加框、类别和置信度。</p>
-    <div class="canvas-wrapper">
-      <canvas ref="canvasRef"></canvas>
-    </div>
-  </div>
+  <el-empty
+    v-if="!hasContent"
+    description="拖入或选择一张麻将手牌图片后，这里会显示自适应预览与检测框。"
+  />
+  <el-scrollbar v-else>
+    <canvas ref="canvasRef" @click="openPreview" style="display: block; width: 100%; height: auto; cursor: zoom-in;"></canvas>
+  </el-scrollbar>
 </template>
