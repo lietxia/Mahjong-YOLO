@@ -1,343 +1,118 @@
-# Mahjong Tile Recognition with YOLO
+# Mahjong-YOLO
 
-A computer vision project that uses YOLO (You Only Look Once) models to detect and recognize mahjong tiles from real-world photographs. The project includes multiple model variants (nano, small, medium, large, extra-large) optimized for different use cases.
+麻将牌识别 Web 应用 — 纯前端浏览器推理，基于 ONNX Runtime Web。
 
-Dataset: https://www.kaggle.com/datasets/shinz114514/mahjong-hand-photos-taken-with-mobile-camera/data
+## 功能
 
-## 🎯 Project Overview
+- **图片上传推理**：拖拽或点击上传麻将手牌图片，浏览器端实时检测
+- **多模型切换**：支持 Nano（5MB，快速）和 Large（97MB，高精度）两个 ONNX 模型
+- **WebGPU / WASM 双路径**：优先使用 WebGPU 加速，自动回退到 WASM
+- **Web Worker 后台推理**：推理在 Worker 线程中执行，不阻塞 UI
+- **检测框画布展示**：画布自适应大小，点击可大图预览
+- **日麻计分**：基于检测结果自动推荐手牌，支持手动编辑后计算番数/符数/点数
+- **Python 基线比对**：与内置 Python 推理基线结果对比
+- **按需加载模型**：首屏只加载元数据，首次推理时才下载 ONNX 模型
+- **Service Worker 缓存**：生产环境缓存应用壳和模型资源
 
-This project implements mahjong tile recognition using YOLOv11, capable of:
-- Detecting mahjong tiles in real-world photographs
-- Recognizing different tile types and suits
-- Processing images with various lighting conditions and backgrounds
-- Providing both PyTorch (.pt) and ONNX model formats for deployment
+## 技术栈
 
-## 📁 Project Structure
+- Vue 3 + TypeScript
+- Vite 6
+- Element Plus（零自定义 CSS）
+- ONNX Runtime Web（WebGPU + WASM）
+- Vitest
 
-```
-├── models/                          # Trained models organized by size
-│   ├── nano/                        # YOLOv11n models (fastest, lowest accuracy)
-│   ├── small/                       # YOLOv11s models (balanced speed/accuracy)
-│   ├── medium/                      # YOLOv11m models (good accuracy)
-│   ├── large/                       # YOLOv11l models (high accuracy)
-│   ├── extra_large/                 # YOLOv11x models (highest accuracy)
-│   └── *.onnx                       # ONNX format models for deployment
-├── scripts/                         # Utility scripts
-│   ├── convert_yolo_to_onnx.py      # Convert PyTorch models to ONNX
-│   └── convert_yolo_to_coreml.py    # Convert PyTorch models to CoreML
-├── notebooks/                       # Jupyter notebooks for training and analysis
-│   ├── data_labeling/               # Data annotation and labeling notebooks
-│   ├── data_processing/             # Data preprocessing notebooks
-│   ├── yolo.ipynb                   # YOLO training notebook
-│   └── yolo_predict.ipynb           # Prediction and evaluation notebook
-├── results/                         # Training and evaluation results
-│   ├── training/                    # Training logs, metrics, and model checkpoints
-│   ├── validation/                  # Validation results
-│   └── predictions/                 # Prediction outputs and visualizations
-├── data/                            # Dataset organization
-│   ├── raw/                         # Original images
-│   ├── processed/                   # Preprocessed images
-│   └── annotations/                 # Label files
-├── docs/                            # Documentation
-├── examples/                        # Usage examples
-└── README.md                        # This file
-```
-
-## 🚀 Model Variants
-
-### Currently Available Trained Models
-
-| Model Size | Trained Model | Status | mAP50 | mAP50-95 | Precision | Recall | Size(MB) | Use Case |
-|------------|---------------|---------|-------|----------|-----------|---------|----------|----------|
-| Nano | trained_models_v2/yolo11n_best.pt | ✅ Complete | **0.880** | 0.676 | 0.943 | 0.748 | 5.2 | Mobile/Edge devices |
-| Small | trained_models_v2/yolo11s_best.pt | ✅ Complete | **0.881** | **0.695** | 0.929 | 0.765 | 18.3 | Real-time applications |
-| Medium | trained_models_v2/yolo11m_best.pt | ✅ Complete | 0.865 | 0.652 | 0.822 | **0.772** | 38.7 | Balanced performance |
-| Large | trained_models_v2/yolo11l_best.pt | 🔄 In Progress | - | - | - | - | - | High accuracy needs |
-| Extra Large | - | ⏳ Planned | - | - | - | - | - | Maximum accuracy |
-
-**Performance Summary:**
-- **Best Overall**: YOLOv11s (mAP50: 0.881, mAP50-95: 0.695)
-- **Highest Precision**: YOLOv11n (0.943)
-- **Best Recall**: YOLOv11m (0.772)
-- **Smallest Model**: YOLOv11n (5.2MB)
-
-### Model Performance
-
-- **Nano (YOLOv11n)**: Fastest inference, optimized for mobile deployment
-- **Small (YOLOv11s)**: Good balance of speed and accuracy for real-time applications
-- **Medium (YOLOv11m)**: Recommended for most use cases, best accuracy/speed trade-off
-- **Large (YOLOv11l)**: High accuracy for production applications
-- **Extra Large (YOLOv11x)**: Maximum accuracy when speed is not critical
-
-## 🛠️ Installation
-
-### Prerequisites
+## 快速开始
 
 ```bash
-pip install ultralytics opencv-python matplotlib torch torchvision
+npm install
+npm run dev
 ```
 
-### Additional Dependencies for Development
+默认开发地址：`http://localhost:5173`
+
+## 构建与测试
 
 ```bash
-pip install jupyter notebook albumentations numpy
+npm test        # 运行测试
+npm run build   # 生产构建，输出到 dist/
+npm run preview # 预览生产构建
 ```
 
-## 💻 Usage
+## 项目结构
 
-### Quick Start - Inference
-
-```python
-from ultralytics import YOLO
-
-# Load a trained model
-model = YOLO('trained_models_v2/yolo11m_best.pt')
-
-# Run inference on an image
-results = model.predict('path/to/mahjong/image.jpg')
-
-# Display results
-results[0].show()
+```
+├── src/
+│   ├── App.vue                    # 主页面（el-splitter 布局）
+│   ├── main.ts                    # 入口，注册 Element Plus
+│   ├── components/
+│   │   └── DetectionCanvas.vue    # 检测框画布组件
+│   ├── workers/
+│   │   └── yolo.worker.ts         # ONNX 推理 Web Worker
+│   └── lib/                       # 推理、计分、工具库
+│       ├── yolo.ts                # Worker 通信封装
+│       ├── preprocess.ts          # 图像预处理（letterbox + tensor）
+│       ├── postprocess.ts         # 推理后处理（decode / NMS）
+│       ├── mahjong.ts             # 日麻计分逻辑
+│       ├── tile.ts                # 牌型解析与排序
+│       ├── manifest.ts            # 模型清单加载
+│       ├── baseline.ts            # Python 基线比对
+│       ├── compatibility.ts       # 浏览器兼容性检测
+│       └── cache.ts               # Service Worker 缓存管理
+├── public/model/                  # ONNX 模型 + 元数据
+│   ├── mahjong-yolon-best.onnx    # Nano 模型
+│   ├── mahjong-yolol-best.onnx    # Large 模型
+│   ├── model_manifest.json        # 模型清单
+│   ├── classes.json               # 类别标签（38 类）
+│   └── python-baselines.json      # Python 基线数据
+├── vendor/mahjong-vue/src/store/  # 日麻计分逻辑（vendored）
+├── package.json
+├── vite.config.ts
+└── tsconfig.json
 ```
 
-### 🎯 Inference Examples
-
-Visual demonstration comparing ground truth labels vs model predictions:
-
-![Validation Demo](inference_examples/validation_demo.png)
-
-**Performance Metrics:**
-- **mAP50** (Mean Average Precision at IoU=0.5): Measures detection accuracy
-- **mAP50-95** (Mean Average Precision at IoU=0.5:0.95): Stricter accuracy measure
-- **Precision**: Percentage of correct positive predictions
-- **Recall**: Percentage of actual positives correctly identified
-
-**Model Recommendations:**
-- **For Mobile Apps**: YOLOv11n (5.2MB, 0.943 precision)
-- **For Real-time Systems**: YOLOv11s (best overall mAP50: 0.881)
-- **For High Recall Needs**: YOLOv11m (0.772 recall, good for finding all tiles) ⭐ **Used in Demo**
-
-**What the Validation Demo Shows:**
-- **Ground Truth vs Predictions**: Side-by-side comparison showing actual labels (left, green) vs model predictions (right, red)
-- **Real Performance Assessment**: Shows both correct detections and model limitations
-- **Detection Accuracy**: 27/29 ground truth objects correctly detected (93.1% recall)
-- **Precision Analysis**: Some false positives visible, showing where model over-detects
-- **Complex Scene Handling**: Demonstrates performance on challenging multi-tile layouts
-- **YOLOv11m Model**: Uses model with best recall (77.2%) for comprehensive tile detection
-
-**Additional Results:**
-- [Complete Validation Report](inference_validation/validation_statistics.txt) - Detailed performance metrics
-- [8 Validation Images](inference_validation/) - Ground truth vs prediction comparisons
-- [Model Performance Metrics](model_validation_results.csv) - mAP, precision, recall for all models
-- [Class Configuration Verification](check_classes.py) - Confirms correct training setup
-
-Generated using: `python3 inference_validation.py` - comprehensive validation on multiple test images
-
-### Using ONNX Models
-
-```python
-import onnxruntime as ort
-import cv2
-import numpy as np
+## 部署
 
-# Load ONNX model
-session = ort.InferenceSession('models/mahjong-yolom-best.onnx')
-
-# Preprocess image
-img = cv2.imread('path/to/image.jpg')
-img_resized = cv2.resize(img, (640, 640))
-img_normalized = img_resized.astype(np.float32) / 255.0
-img_transposed = np.transpose(img_normalized, (2, 0, 1))
-img_batch = np.expand_dims(img_transposed, axis=0)
-
-# Run inference
-outputs = session.run(None, {'images': img_batch})
-```
+纯静态前端应用，可部署到任何静态文件托管平台：
 
-### Model Conversion
+- GitHub Pages / Cloudflare Pages / Netlify / Vercel
+- Nginx / 对象存储静态网站
 
-Convert PyTorch models to ONNX format:
+构建产物在 `dist/` 目录，需部署到域名根路径。
 
-```bash
-python scripts/convert_yolo_to_onnx.py models/medium/mahjong-yolom-best.pt
-```
+### 部署检查项
 
-Convert PyTorch models to CoreML format:
+1. `dist/model/` 中的 JSON 和 ONNX 文件可被直接访问
+2. 启用 HTTPS（WebGPU 需要安全上下文）
+3. 不要拦截或重写 `model/*.json` 和 `model/*.onnx` 请求
 
-```bash
-python scripts/convert_yolo_to_coreml.py models/medium/mahjong-yolom-best.pt
-```
+## 浏览器兼容性
 
-Batch conversion (all models):
+### 推理基本要求
 
-```bash
-python scripts/convert_yolo_to_onnx.py models/ --batch
-python scripts/convert_yolo_to_coreml.py models/ --batch
-```
+- Web Worker
+- fetch
+- createImageBitmap
+- WebAssembly
 
-## 🎓 Training
+### WebGPU / WASM 行为
 
-### Data Preparation
+- **优先路径**：Web Worker + WebGPU
+- **回退路径**：Web Worker + WASM
 
-1. Organize your dataset in YOLO format:
-   ```
-   dataset/
-   ├── images/
-   │   ├── train/
-   │   ├── val/
-   │   └── test/
-   └── labels/
-       ├── train/
-       ├── val/
-       └── test/
-   ```
+浏览器没有 WebGPU 或 WebGPU 初始化失败时自动回退到 WASM，页面会显示当前执行路径。
 
-2. Create a data configuration file (`data.yaml`):
-   ```yaml
-   train: path/to/train/images
-   val: path/to/val/images
-   test: path/to/test/images
-   
-   nc: 34  # number of classes (mahjong tile types)
-   names: ['1m', '2m', '3m', ..., 'red', 'green', 'white']
-   ```
+## 麻将牌类别
 
-### Training Different Model Sizes
+模型识别 38 种麻将牌：
 
-```python
-from ultralytics import YOLO
+- **万子**：1m–9m, 0m（赤五万）
+- **饼子**：1p–9p, 0p（赤五饼）
+- **索子**：1s–9s, 0s（赤五索）
+- **风牌**：1z（东）、2z（南）、3z（西）、4z（北）
+- **三元牌**：5z（白）、6z（发）、7z（中）
+- **特殊**：UNKNOWN（模糊/损坏牌）
 
-# Train nano model
-model = YOLO('models/nano/yolo11n.pt')
-model.train(data='data.yaml', epochs=500, batch=24, name='mahjong-yolon')
+## License
 
-# Train small model
-model = YOLO('models/small/yolo11s.pt')
-model.train(data='data.yaml', epochs=500, batch=16, name='mahjong-yolos')
-
-# Train medium model
-model = YOLO('models/medium/yolo11m.pt')
-model.train(data='data.yaml', epochs=500, batch=12, name='mahjong-yolom')
-
-# Train large model
-model = YOLO('models/large/yolo11l.pt')
-model.train(data='data.yaml', epochs=500, batch=10, name='mahjong-yolol')
-```
-
-## 📊 Evaluation
-
-### Model Validation
-
-```python
-# Validate trained model
-model = YOLO('models/medium/mahjong-yolom-best.pt')
-metrics = model.val()
-
-print(f"mAP50: {metrics.box.map50}")
-print(f"mAP50-95: {metrics.box.map}")
-```
-
-### Performance Metrics
-
-Training results include:
-- Precision/Recall curves
-- F1 score curves
-- Confusion matrices
-- Training loss graphs
-- Validation metrics
-
-## 🎯 Mahjong Tile Classes
-
-The model recognizes 38 different mahjong tile types:
-
-### Number Tiles (Man/Wan - Characters)
-- 1m through 9m, 0m (red five)
-
-### Number Tiles (Pin/Bing - Circles)
-- 1p through 9p, 0p (red five)
-
-### Number Tiles (Sou/Tiao - Bamboos)
-- 1s through 9s, 0s (red five)
-
-### Honor Tiles (Winds - Z tiles)
-- 1z (East), 2z (South), 3z (West), 4z (North)
-
-### Honor Tiles (Dragons - Z tiles)
-- 5z (White Dragon), 6z (Green Dragon), 7z (Red Dragon)
-
-### Special Recognition
-- UNKNOWN class for unclear or damaged tiles
-
-**Total Classes**: 38 (including red fives and unknown category)
-
-## 🔧 Customization
-
-### Adding New Tile Types
-
-1. Update the data configuration file with new classes
-2. Retrain the model with expanded dataset
-3. Update the class names in prediction scripts
-
-### Hyperparameter Tuning
-
-Key training parameters to adjust:
-- `batch`: Batch size (adjust based on GPU memory)
-- `lr0`: Initial learning rate
-- `epochs`: Training epochs
-- `patience`: Early stopping patience
-- `conf`: Confidence threshold for predictions
-- `iou`: IoU threshold for NMS
-
-## 📈 Performance Tips
-
-### For Speed
-- Use nano or small models
-- Convert to ONNX format
-- Use TensorRT for NVIDIA GPUs
-- Optimize input image size
-
-### For Accuracy
-- Use medium, large, or extra-large models
-- Increase training epochs
-- Use data augmentation
-- Ensemble multiple models
-
-### For Deployment
-- Use ONNX models for cross-platform compatibility
-- Use CoreML models for iOS/macOS deployment
-- Implement batch processing for multiple images
-- Use GPU acceleration when available
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests and documentation
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 👥 Authors
-
-- **Zhen Zhang** - zhenz@vt.edu
-- **Yiyun Huang** - yiyunh@vt.edu
-
-## 🙏 Acknowledgments
-
-- [Ultralytics](https://ultralytics.com/) for the YOLO implementation
-- The computer vision community for datasets and techniques
-- Contributors to the mahjong recognition research
-
-## 📞 Support
-
-For questions and support:
-- Open an issue on GitHub
-- Check the documentation in the `docs/` folder
-- Review the example notebooks in `notebooks/`
-
----
-
-*Built with ❤️ for the mahjong and computer vision communities*
+MIT

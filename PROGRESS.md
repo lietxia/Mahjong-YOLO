@@ -2,7 +2,7 @@
 
 ## 概述
 
-将 `web_app/` 下的 Vue3 界面从自定义 CSS 全面迁移到 Element Plus 原生组件，实现响应式布局、拖拽上传、大图预览等产品化能力。
+将项目从完整的训练+推理仓库改造为纯前端浏览器推理项目。UI 从自定义 CSS 全面迁移到 Element Plus 原生组件。
 
 ## 已完成工作
 
@@ -31,13 +31,32 @@
 - 压平 HTML 嵌套，移除不必要层级
 - 验证：测试 29/29 通过、构建成功、浏览器 QA 通过
 
+### Round 4：纯前端项目改造
+
+- 删除所有训练相关文件：
+  - Python 脚本（check_classes.py、create_labeled_demo.py、generate_inference_examples.py、inference_validation.py、validate_models.py）
+  - 训练 notebooks（notebooks/）
+  - PyTorch 模型权重（trained_models_v2/、models/）
+  - 模型转换脚本（scripts/）
+  - 推理示例图片（inference_examples/、inference_validation/）
+  - 测试照片（mahjong_photos/）
+  - 训练结果数据（model_validation_results.csv）
+- 将 `web_app/` 内容提升到项目根目录
+- 清理遗留代码：
+  - 删除 LiveDetectionCanvas.vue、live-camera.ts 及其测试
+  - 移除 vue-router 依赖
+  - 清理 vendor/mahjong-vue 中未使用的文件（仅保留 src/store/）
+- 重写 README.md 为纯前端推理项目说明
+- 更新 .gitignore 为纯前端项目配置
+- 验证：测试 25/25 通过、构建成功
+
 ## 当前技术栈
 
 - **框架**: Vue 3.5 + TypeScript 5.7
 - **构建**: Vite 6
 - **UI 组件库**: Element Plus 2.13（零自定义 CSS）
 - **推理引擎**: ONNX Runtime Web 1.22（WebGPU 优先，WASM 回退）
-- **测试**: Vitest（29 个测试用例）
+- **测试**: Vitest（25 个测试用例）
 
 ## 当前功能
 
@@ -54,7 +73,6 @@
 ## 项目结构
 
 ```
-web_app/
 ├── src/
 │   ├── App.vue                    # 主页面（el-splitter 布局）
 │   ├── main.ts                    # 入口，注册 Element Plus
@@ -70,6 +88,4 @@ web_app/
 
 ## 下一步计划
 
-- 将项目改造为纯前端项目（移除所有训练相关代码）
-- 清理遗留代码（LiveDetectionCanvas、live-camera.ts 等）
-- 重写 README.md
+- 项目已完成纯前端改造，可直接部署到静态托管平台
