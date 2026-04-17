@@ -6,10 +6,10 @@ import DetectionCanvas from './components/DetectionCanvas.vue';
 import { clearRegisteredAssetCaches, registerAssetCacheServiceWorker, type AssetCacheStatus } from './lib/cache';
 import { compareWithBaseline, findBaselineSample } from './lib/baseline';
 import { getBrowserCompatibility, getWebGpuAvailabilityState, isGpuAdapterUnavailableReason } from './lib/compatibility';
-import { calculateMahjongScore, type AgariType, type ScoreContext, type Wind } from './lib/mahjong';
+import { calculateMahjongScore, type AgariType, type FuroMeld, type ScoreContext, type Wind } from './lib/mahjong';
 import { summarizeModelAssets } from './lib/labels';
 import { loadModelAssets, type ModelAssets } from './lib/manifest';
-import { countRedDora, isMahjongTileCode, parseTileInput, toOrderedTileLabels, type RecognizedTile } from './lib/tile';
+import { countRedDora, isMahjongTileCode, parseTileInput, separateHandAndFuro, toOrderedTileLabels, type RecognizedTile } from './lib/tile';
 import type { InferenceTimings } from './lib/yolo.messages';
 import type { InferenceOutcome, YoloBrowserRunner } from './lib/yolo';
 
@@ -38,7 +38,6 @@ const preparingModel = ref(false);
 const runningInference = ref(false);
 const assetError = ref<string | null>(null);
 const inferenceError = ref<string | null>(null);
-const statusMessage = ref('正在读取模型清单...');
 const backendUsed = ref<'webgpu' | 'wasm' | null>(null);
 const backendFallbackReason = ref<string | null>(null);
 const outputShape = ref<number[]>([]);
@@ -52,6 +51,8 @@ const editableRecommendedHand = ref('');
 const doraIndicatorsInput = ref('');
 const uraIndicatorsInput = ref('');
 const scoreMessage = ref('');
+const autoFuroMelds = ref<FuroMeld[]>([]);
+const furoTilesTexts = ref<string[]>([]);
 const compatibility = ref(getBrowserCompatibility());
 
 const scoreContext = reactive<ScoreContext>({
@@ -63,14 +64,21 @@ const scoreContext = reactive<ScoreContext>({
   agariIndex: 13,
   doraIndicators: [],
   uraIndicators: [],
+  furo: [],
 });
 
 const modelOptions = computed(() => modelAssets.value?.manifest.models ?? []);
-const recommendedTiles = computed(() => toOrderedTileLabels(uploadDetections.value));
+const separatedResult = computed(() => separateHandAndFuro(uploadDetections.value));
+const recommendedTiles = computed(() => separatedResult.value.handTiles.map((tile) => tile.label));
 const recommendedHandText = computed(() => recommendedTiles.value.join(' '));
+const autoDetectedFuro = computed(() =>
+  separatedResult.value.furoGroups.map((group) => group.map((tile) => tile.label)),
+);
 const scoringTiles = computed(() => parseTileInput(editableRecommendedHand.value));
 const recommendedRedDoraCount = computed(() => countRedDora(recommendedTiles.value));
-const scoringRedDoraCount = computed(() => countRedDora(scoringTiles.value));
+const scoringRedDoraCount = computed(() => countRedDora([...scoringTiles.value, ...scoreContext.furo.flatMap((m) => m.tiles)]));
+const furoTileCount = computed(() => scoreContext.furo.reduce((sum, meld) => sum + meld.tiles.length, 0));
+const totalScoringTiles = computed(() => scoringTiles.value.length + furoTileCount.value);
 const scoring = computed(() => calculateMahjongScore(scoringTiles.value, scoreContext));
 const inferenceSupported = computed(() => compatibility.value.inferenceSupported);
 const browserBlockingMessage = computed(() => compatibility.value.blockingIssues.join('；'));
@@ -124,7 +132,6 @@ const webGpuCapabilityLabel = computed(() => {
   }
 });
 const activeModelLabel = computed(() => modelAssets.value?.manifest.activeModel.label ?? '未选择');
-const activeModelFile = computed(() => modelAssets.value?.manifest.modelFile ?? '未加载');
 const modelLifecycleMessage = computed(() => {
   if (loadingAssets.value) {
     return '正在读取模型清单、可选模型、类别和基线数据。首屏不会立即下载 ONNX 模型。';
@@ -219,6 +226,29 @@ watch(recommendedHandText, (nextValue) => {
   editableRecommendedHand.value = nextValue;
 }, { immediate: true });
 
+watch(autoDetectedFuro, (groups) => {
+  if (groups.length === 0) {
+    return;
+  }
+
+  const melds: FuroMeld[] = groups.map((tileLabels) => {
+    const type = inferFuroType(tileLabels);
+    return { type, tiles: tileLabels };
+  });
+
+  autoFuroMelds.value = melds;
+  scoreContext.furo = melds.map((m) => ({ ...m }));
+  furoTilesTexts.value = melds.map((m) => m.tiles.join(','));
+}, { immediate: true });
+
+watch(furoTilesTexts, (texts) => {
+  scoreContext.furo.forEach((meld, i) => {
+    if (texts[i] !== undefined) {
+      meld.tiles = parseTileInput(texts[i]);
+    }
+  });
+}, { deep: true });
+
 watch(scoringTiles, (tiles, previousTiles) => {
   if (tiles.length === 0) {
     scoreContext.agariIndex = 0;
@@ -233,6 +263,25 @@ watch(scoringTiles, (tiles, previousTiles) => {
   scoreContext.agariIndex = Math.min(scoreContext.agariIndex, tiles.length - 1);
 });
 
+function inferFuroType(tileLabels: string[]): 'chi' | 'pon' | 'kan' {
+  if (tileLabels.length === 4) return 'kan';
+  if (tileLabels.length !== 3) return 'pon';
+  const nums = tileLabels.map((t) => Number(t[0]));
+  const suit = tileLabels[0].slice(-1);
+  if (tileLabels.every((t) => t.slice(-1) === suit) && nums[0] !== nums[1]) return 'chi';
+  return 'pon';
+}
+
+function addFuroMeld() {
+  scoreContext.furo.push({ type: 'pon', tiles: [] });
+  furoTilesTexts.value.push('');
+}
+
+function removeFuroMeld(index: number) {
+  scoreContext.furo.splice(index, 1);
+  furoTilesTexts.value.splice(index, 1);
+}
+
 watch(doraIndicatorsInput, (value) => {
   scoreContext.doraIndicators = parseIndicatorList(value);
 }, { immediate: true });
@@ -244,11 +293,9 @@ watch(uraIndicatorsInput, (value) => {
 function applyInferenceOutcome(outcome: InferenceOutcome) {
   uploadInferenceAttempted.value = true;
   uploadDetections.value = outcome.detections;
-  statusMessage.value =
-    outcome.backend === 'webgpu'
-      ? `上传图片推理已在 Web Worker 中通过 WebGPU 完成，当前模型为 ${activeModelLabel.value}。`
-      : `上传图片推理当前来自 Web Worker 内的 WASM 回退路径，当前模型为 ${activeModelLabel.value}。`;
-  scoreMessage.value = `识别完成：${outcome.detections.length} 个框；画布与原始检测明细展示全部后处理检测，最可能手牌推荐默认已写入可编辑计分输入。`;
+  const { handTiles, furoGroups } = separateHandAndFuro(outcome.detections);
+  const furoInfo = furoGroups.length > 0 ? `，检测到 ${furoGroups.length} 组副露` : '';
+  scoreMessage.value = `识别完成：${outcome.detections.length} 个框，手牌 ${handTiles.length} 张${furoInfo}；画布与原始检测明细展示全部后处理检测，最可能手牌推荐默认已写入可编辑计分输入。`;
   backendUsed.value = outcome.backend;
   backendFallbackReason.value = outcome.fallbackReason;
   outputShape.value = outcome.rawShape;
@@ -265,20 +312,30 @@ function resetModelSession() {
   timingMetrics.value = null;
 }
 
+function resetInferenceState() {
+  uploadInferenceAttempted.value = false;
+  uploadDetections.value = [];
+  editableRecommendedHand.value = '';
+  inferenceError.value = null;
+  outputShape.value = [];
+  timingMetrics.value = null;
+  scoreMessage.value = '';
+  autoFuroMelds.value = [];
+  scoreContext.furo = [];
+  furoTilesTexts.value = [];
+}
+
 async function loadAssetsMetadata(modelId?: string): Promise<boolean> {
   loadingAssets.value = true;
   assetError.value = null;
-  statusMessage.value = '正在读取模型清单、类别和基线数据...';
 
   try {
     const assets = await loadModelAssets(modelId);
     modelAssets.value = assets;
     selectedModelId.value = assets.manifest.activeModel.id;
-    statusMessage.value = `页面已就绪。当前模型：${assets.manifest.activeModel.label}；首次推理时按需初始化。`;
     return true;
   } catch (error) {
     assetError.value = error instanceof Error ? error.message : '初始化模型资源失败';
-    statusMessage.value = '模型元数据读取失败，请检查静态资源是否已完整部署。';
     return false;
   } finally {
     loadingAssets.value = false;
@@ -288,7 +345,6 @@ async function loadAssetsMetadata(modelId?: string): Promise<boolean> {
 async function ensureModelReady(): Promise<boolean> {
   if (!inferenceSupported.value) {
     assetError.value = browserBlockingMessage.value || '当前浏览器环境不支持 Web 推理。';
-    statusMessage.value = '当前浏览器环境不满足推理要求。';
     return false;
   }
 
@@ -309,7 +365,6 @@ async function ensureModelReady(): Promise<boolean> {
 
   preparingModel.value = true;
   assetError.value = null;
-  statusMessage.value = `正在按需初始化模型 ${modelAssets.value.manifest.activeModel.label} 与 Worker...`;
 
   const { YoloBrowserRunner: LazyYoloBrowserRunner } = await import('./lib/yolo');
   const runner = modelRunner.value ?? new LazyYoloBrowserRunner(modelAssets.value);
@@ -320,10 +375,6 @@ async function ensureModelReady(): Promise<boolean> {
     modelReady.value = true;
     backendUsed.value = initResult.backend;
     backendFallbackReason.value = initResult.fallbackReason;
-    statusMessage.value =
-      initResult.backend === 'webgpu'
-        ? `模型初始化完成，当前使用 ${modelAssets.value.manifest.activeModel.label} + Web Worker + WebGPU。`
-        : `模型初始化完成，当前使用 ${modelAssets.value.manifest.activeModel.label} + Web Worker 内的 WASM 回退路径。`;
     return true;
   } catch (error) {
     runner.dispose();
@@ -332,7 +383,6 @@ async function ensureModelReady(): Promise<boolean> {
     backendUsed.value = null;
     backendFallbackReason.value = null;
     assetError.value = error instanceof Error ? error.message : '初始化模型资源失败';
-    statusMessage.value = '模型初始化失败，请稍后重试或清理静态缓存。';
     return false;
   } finally {
     preparingModel.value = false;
@@ -353,7 +403,6 @@ async function clearAssetCache() {
       enabled: false,
       message,
     };
-    statusMessage.value = '静态缓存已清理；如需重新建立缓存，请刷新页面。';
   } finally {
     clearingCache.value = false;
   }
@@ -365,26 +414,15 @@ async function onModelChange(nextModelId: string) {
   }
 
   const previousModelId = modelAssets.value?.manifest.activeModel.id ?? selectedModelId.value;
-  statusMessage.value = '正在切换模型...';
 
   const loaded = await loadAssetsMetadata(nextModelId);
   if (!loaded) {
     selectedModelId.value = previousModelId;
-    statusMessage.value = modelAssets.value
-      ? `模型切换失败，当前仍使用 ${modelAssets.value.manifest.activeModel.label}。`
-      : '模型切换失败，请稍后重试。';
     return;
   }
 
   resetModelSession();
-  uploadInferenceAttempted.value = false;
-  uploadDetections.value = [];
-  editableRecommendedHand.value = '';
-  inferenceError.value = null;
-  scoreMessage.value = '';
-  if (modelAssets.value) {
-    statusMessage.value = `已切换到 ${modelAssets.value.manifest.activeModel.label}，请重新运行推理。`;
-  }
+  resetInferenceState();
 }
 
 function applySelectedFile(file: File, fileName: string) {
@@ -396,13 +434,7 @@ function applySelectedFile(file: File, fileName: string) {
   selectedFile.value = file;
   selectedFileName.value = fileName;
   selectedImageName.value = fileName;
-  uploadInferenceAttempted.value = false;
-  uploadDetections.value = [];
-  editableRecommendedHand.value = '';
-  inferenceError.value = null;
-  outputShape.value = [];
-  timingMetrics.value = null;
-  scoreMessage.value = '';
+  resetInferenceState();
 }
 
 function onFileChange(uploadFile: UploadFile) {
@@ -433,6 +465,7 @@ async function runInference() {
 
   uploadInferenceAttempted.value = true;
   inferenceError.value = null;
+
   const ready = await ensureModelReady();
 
   if (!ready || !modelRunner.value) {
@@ -440,7 +473,6 @@ async function runInference() {
   }
 
   runningInference.value = true;
-  statusMessage.value = `正在通过 Web Worker 运行 ${activeModelLabel.value} 的 YOLO 推理...`;
 
   try {
     const imageBitmap = await createImageBitmap(selectedFile.value);
@@ -448,7 +480,6 @@ async function runInference() {
     applyInferenceOutcome(outcome);
   } catch (error) {
     inferenceError.value = error instanceof Error ? error.message : '推理失败';
-    statusMessage.value = '推理失败，请稍后重试。';
   } finally {
     runningInference.value = false;
   }
@@ -463,20 +494,8 @@ function resetUpload() {
   selectedFile.value = null;
   selectedFileName.value = '';
   selectedImageName.value = '';
-  uploadInferenceAttempted.value = false;
-  uploadDetections.value = [];
   uploadRef.value?.clearFiles();
-  editableRecommendedHand.value = '';
-  inferenceError.value = null;
-  outputShape.value = [];
-  timingMetrics.value = null;
-  scoreMessage.value = '';
-  statusMessage.value =
-    modelReady.value && modelAssets.value
-      ? backendUsed.value === 'webgpu'
-        ? `已清空当前图片与识别结果，${modelAssets.value.manifest.activeModel.label} 仍保持 WebGPU 就绪。`
-        : `已清空当前图片与识别结果，${modelAssets.value.manifest.activeModel.label} 当前仍使用 WASM 路径。`
-      : '已清空当前图片与识别结果；模型会继续保持按需初始化。';
+  resetInferenceState();
 }
 
 function formatTiming(value: number): string {
@@ -502,12 +521,12 @@ onUnmounted(() => {
     <el-splitter style="height: 100%;">
       <el-splitter-panel size="68%" min="420">
         <el-scrollbar height="100%">
-          <el-space direction="vertical" fill size="large">
+          <el-space direction="vertical" fill size="large" style="width: 100%;">
             <el-space wrap>
               <el-select
-                v-if="modelOptions.length > 0"
                 v-model="selectedModelId"
                 placeholder="选择模型"
+                style="min-width: 240px;"
                 :disabled="loadingAssets || preparingModel || runningInference"
                 @change="onModelChange"
               >
@@ -517,21 +536,32 @@ onUnmounted(() => {
                 {{ runningInference ? '推理中...' : preparingModel ? '初始化中...' : '运行 YOLO 推理' }}
               </el-button>
               <el-button :disabled="!canResetUpload" @click="resetUpload">清空</el-button>
+              <el-upload
+                v-if="imageUrl"
+                ref="uploadRef"
+                :auto-upload="false"
+                :show-file-list="false"
+                :limit="1"
+                accept="image/*"
+                :on-change="onFileChange"
+                :on-exceed="onFileExceed"
+              >
+                <el-button :disabled="loadingAssets || preparingModel || runningInference">{{ selectedFileName ? '重新选择' : '选择图片' }}</el-button>
+              </el-upload>
               <el-tag v-if="selectedFileName" type="info" effect="plain">{{ selectedFileName }}</el-tag>
             </el-space>
 
             <el-upload
-              ref="uploadRef"
+              v-if="!imageUrl"
               drag
               :auto-upload="false"
               :show-file-list="false"
               :limit="1"
               accept="image/*"
               :on-change="onFileChange"
-              :on-exceed="onFileExceed"
             >
-              <div>拖拽图片到这里，或点击选择</div>
-              <div>支持单张麻将手牌图片；上传后可直接预览并运行推理。</div>
+              <el-text>拖拽图片到这里，或点击选择</el-text>
+              <el-text type="info" size="small">支持单张麻将手牌图片；上传后可直接预览并运行推理。</el-text>
             </el-upload>
 
             <DetectionCanvas :image-url="imageUrl" :detections="uploadDetections" />
@@ -541,7 +571,7 @@ onUnmounted(() => {
 
       <el-splitter-panel size="32%" min="320">
         <el-scrollbar height="100%">
-          <el-space direction="vertical" fill size="large">
+          <el-space direction="vertical" fill size="large" style="width: 100%;">
             <el-card header="状态与结果">
               <el-alert v-if="uploadEmptyMessage" :title="uploadEmptyMessage" type="info" :closable="false" show-icon />
               <el-alert v-if="assetError" :title="`初始化失败：${assetError}`" type="warning" :closable="false" show-icon />
@@ -557,30 +587,32 @@ onUnmounted(() => {
 
               <el-collapse>
                 <el-collapse-item title="诊断详情" name="diagnostics">
-                  <el-alert :title="modelLifecycleMessage" type="info" :closable="false" show-icon />
-                  <el-alert :title="cacheStatusMessage" type="info" :closable="false" show-icon />
+                  <el-space direction="vertical" fill>
+                    <el-alert :title="modelLifecycleMessage" type="info" :closable="false" show-icon />
+                    <el-alert :title="cacheStatusMessage" type="info" :closable="false" show-icon />
 
-                  <el-button :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
-                    {{ clearingCache ? '清理中...' : '清理静态缓存' }}
-                  </el-button>
+                    <el-button :disabled="clearingCache || loadingAssets || preparingModel || runningInference" @click="clearAssetCache">
+                      {{ clearingCache ? '清理中...' : '清理静态缓存' }}
+                    </el-button>
 
-                  <el-alert v-if="browserBlockingMessage" :title="`浏览器不满足推理要求：${browserBlockingMessage}`" type="warning" :closable="false" show-icon />
-                  <el-alert v-else-if="compatibilityNotices.length > 0" type="info" :closable="false" show-icon>
-                    <template #title>兼容性提示</template>
-                    <ul>
-                      <li v-for="notice in compatibilityNotices" :key="notice">{{ notice }}</li>
-                    </ul>
-                  </el-alert>
+                    <el-alert v-if="browserBlockingMessage" :title="`浏览器不满足推理要求：${browserBlockingMessage}`" type="warning" :closable="false" show-icon />
+                    <el-alert v-else-if="compatibilityNotices.length > 0" type="info" :closable="false" show-icon>
+                      <template #title>兼容性提示</template>
+                      <ul>
+                        <li v-for="notice in compatibilityNotices" :key="notice">{{ notice }}</li>
+                      </ul>
+                    </el-alert>
 
-                  <el-alert v-if="backendFallbackReason" type="warning" :closable="false" show-icon>
-                    <template #title>
-                      <span v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
-                        WebGPU API 可用但无 GPU adapter，已回退 WASM：{{ backendFallbackReason }}
-                      </span>
-                      <span v-else>WebGPU 未能启用，已回退 WASM：{{ backendFallbackReason }}</span>
-                    </template>
-                  </el-alert>
-
+                    <el-alert v-if="backendFallbackReason" type="warning" :closable="false" show-icon>
+                      <template #title>
+                        <span v-if="isGpuAdapterUnavailableReason(backendFallbackReason)">
+                          WebGPU API 可用但无 GPU adapter，已回退 WASM：{{ backendFallbackReason }}
+                        </span>
+                        <span v-else>WebGPU 未能启用，已回退 WASM：{{ backendFallbackReason }}</span>
+                      </template>
+                    </el-alert>
+                  </el-space>
+                  <br />
                   <el-descriptions v-if="modelInfo" :column="2" border>
                     <el-descriptions-item label="模型">{{ modelInfo.model }}</el-descriptions-item>
                     <el-descriptions-item label="文件">{{ modelInfo.modelFile }}</el-descriptions-item>
@@ -591,13 +623,17 @@ onUnmounted(() => {
                     <el-descriptions-item label="线程">Web Worker</el-descriptions-item>
                     <el-descriptions-item label="输出形状">{{ outputShape.length > 0 ? JSON.stringify(outputShape) : '未返回' }}</el-descriptions-item>
                   </el-descriptions>
-
+                  <br v-if="modelInfo && timingMetrics" />
                   <el-descriptions v-if="timingMetrics" :column="2" border>
                     <el-descriptions-item label="预处理">{{ formatTiming(timingMetrics.preprocessMs) }}</el-descriptions-item>
                     <el-descriptions-item label="推理">{{ formatTiming(timingMetrics.inferenceMs) }}</el-descriptions-item>
                     <el-descriptions-item label="后处理">{{ formatTiming(timingMetrics.postprocessMs) }}</el-descriptions-item>
                     <el-descriptions-item label="总耗时">{{ formatTiming(timingMetrics.totalMs) }}</el-descriptions-item>
                   </el-descriptions>
+                </el-collapse-item>
+                <el-collapse-item title="原始检测明细" name="raw-detections">
+                  <el-empty v-if="rawDetectionPayload.length === 0" description="运行推理后，这里会列出每个检测框的分类、置信度、坐标和中心点信息。" />
+                  <el-input v-else :model-value="rawDetectionText" type="textarea" :rows="10" readonly />
                 </el-collapse-item>
               </el-collapse>
             </el-card>
@@ -632,7 +668,7 @@ onUnmounted(() => {
                 v-model="editableRecommendedHand"
                 type="textarea"
                 :rows="3"
-                placeholder="用于计分的手牌（默认取自推荐，可编辑；空格/逗号/换行分隔）"
+                placeholder="用于计分的手牌（默认取自推荐，可编辑；空格/逗号/换行分隔；仅填暗手牌张）"
               />
 
               <el-space v-if="scoringTiles.length > 0" wrap>
@@ -644,9 +680,22 @@ onUnmounted(() => {
                 >
                   {{ tile }}
                 </el-tag>
+                <template v-if="scoreContext.furo.length > 0">
+                  <el-tag v-for="(_, sepIdx) in scoreContext.furo" :key="`furo-sep-${sepIdx}`" type="" effect="dark" style="margin: 0 2px;">
+                    ┃
+                  </el-tag>
+                  <el-tag
+                    v-for="(tile, fidx) in scoreContext.furo.flatMap((m) => m.tiles)"
+                    :key="`scoring-furo-${tile}-${fidx}`"
+                    type="success"
+                    effect="plain"
+                  >
+                    {{ tile }}
+                  </el-tag>
+                </template>
               </el-space>
 
-              <el-text type="info" size="small">计分输入 {{ scoringTiles.length }} 张；赤宝牌：{{ scoringRedDoraCount }}</el-text>
+              <el-text type="info" size="small">计分输入 {{ scoringTiles.length }} 张手牌 + {{ furoTileCount }} 张副露 = {{ totalScoringTiles }} 张；赤宝牌：{{ scoringRedDoraCount }}</el-text>
               <el-text v-if="baselineComparison && baselineComparison.mismatches.length > 0" type="warning" size="small">
                 差异：{{ baselineComparison.mismatches.slice(0, 5).map((item) => `#${item.index}: ${item.expected ?? '∅'} → ${item.actual ?? '∅'}`).join(' / ') }}
               </el-text>
@@ -687,21 +736,37 @@ onUnmounted(() => {
                 </el-row>
 
                 <el-row :gutter="16">
-                  <el-col :span="12">
+                  <el-col :span="8">
                     <el-form-item label="宝牌指示牌">
                       <el-input v-model="doraIndicatorsInput" placeholder="逗号分隔，如 3m,7p" clearable />
                     </el-form-item>
                   </el-col>
-                  <el-col :span="12">
+                  <el-col :span="8">
                     <el-form-item label="里宝牌指示牌">
                       <el-input v-model="uraIndicatorsInput" placeholder="逗号分隔" clearable />
                     </el-form-item>
                   </el-col>
+                  <el-col :span="8">
+                    <el-form-item label="额外状态">
+                      <el-checkbox v-model="scoreContext.riichi">立直</el-checkbox>
+                      <el-checkbox v-model="scoreContext.ippatsu">一发</el-checkbox>
+                    </el-form-item>
+                  </el-col>
                 </el-row>
 
-                <el-form-item label="额外状态">
-                  <el-checkbox-button v-model="scoreContext.riichi">立直</el-checkbox-button>
-                  <el-checkbox-button v-model="scoreContext.ippatsu">一发</el-checkbox-button>
+                <el-form-item label="副露">
+                  <el-space direction="vertical" fill>
+                    <el-space v-for="(meld, index) in scoreContext.furo" :key="index" wrap>
+                      <el-select v-model="meld.type" style="width: 80px;">
+                        <el-option label="吃" value="chi" />
+                        <el-option label="碰" value="pon" />
+                        <el-option label="杠" value="kan" />
+                      </el-select>
+                      <el-input v-model="furoTilesTexts[index]" placeholder="如 1m,2m,3m" style="width: 200px;" />
+                      <el-button type="danger" size="small" @click="removeFuroMeld(index)">删除</el-button>
+                    </el-space>
+                    <el-button size="small" @click="addFuroMeld">添加副露</el-button>
+                  </el-space>
                 </el-form-item>
               </el-form>
 
@@ -741,20 +806,10 @@ onUnmounted(() => {
 
               <el-alert v-else :title="scoring.message" type="warning" :closable="false" show-icon />
 
-              <el-alert
-                title="限制：不自动识别副露、宝牌指示牌、里宝牌、立直或局况，需人工补录。"
-                type="info"
-                :closable="false"
-                show-icon
-              />
+              <el-text v-if="scoring.status === 'incomplete'" type="info" size="small">
+                提示：副露、宝牌指示牌、里宝牌、立直或局况需人工确认或补录。
+              </el-text>
             </el-card>
-
-            <el-collapse>
-              <el-collapse-item title="原始检测明细" name="raw-detections">
-                <el-empty v-if="rawDetectionPayload.length === 0" description="运行推理后，这里会列出每个检测框的分类、置信度、坐标和中心点信息。" />
-                <el-input v-else :model-value="rawDetectionText" type="textarea" :rows="10" readonly />
-              </el-collapse-item>
-            </el-collapse>
           </el-space>
         </el-scrollbar>
       </el-splitter-panel>
