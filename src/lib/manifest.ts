@@ -5,6 +5,13 @@ export type ModelVariant = {
   notes?: string[];
 };
 
+export type SahiConfig = {
+  enabled: boolean;
+  sliceSize: number;
+  overlapRatio: number;
+  includeFullImage: boolean;
+};
+
 export type ModelManifest = {
   defaultModelId: string;
   models: ModelVariant[];
@@ -13,11 +20,26 @@ export type ModelManifest = {
   inputSize: number;
   confidenceThreshold: number;
   iouThreshold: number;
+  sahiEnabled?: boolean;
+  sahiSliceSize?: number;
+  sahiOverlapRatio?: number;
+  sahiIncludeFullImage?: boolean;
+  sizeFilterEnabled?: boolean;
+  sizeRatioThreshold?: number;
   ordering: string;
   classesSource: string;
   baselineSource: string;
   notes: string[];
 };
+
+export function resolveSahiConfig(manifest: ModelManifest): SahiConfig {
+  return {
+    enabled: manifest.sahiEnabled === true,
+    sliceSize: manifest.sahiSliceSize ?? 320,
+    overlapRatio: manifest.sahiOverlapRatio ?? 0.2,
+    includeFullImage: manifest.sahiIncludeFullImage !== false,
+  };
+}
 
 export type BaselineSample = {
   imageName: string;

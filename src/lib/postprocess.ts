@@ -15,8 +15,11 @@ export function decodeOutput(output: ort.Tensor, meta: LetterboxMeta, assets: Mo
   const detections = decodeRows(output.dims, output.data as Float32Array | number[], assets.classes.length);
   const filtered = detections.filter((detection) => detection.score >= assets.manifest.confidenceThreshold);
   const nmsDetections = nonMaximumSuppression(filtered, assets.manifest.iouThreshold);
+  const sizeFiltered = assets.manifest.sizeFilterEnabled !== false
+    ? filterSizeOutliers(nmsDetections, assets.manifest.sizeRatioThreshold ?? 0.5)
+    : nmsDetections;
 
-  return nmsDetections.map((detection) => {
+  return sizeFiltered.map((detection) => {
     const bbox = restoreBoundingBox(detection.bbox, meta);
     const centerX = (bbox[0] + bbox[2]) / 2;
     const centerY = (bbox[1] + bbox[3]) / 2;
@@ -184,13 +187,80 @@ export function nonMaximumSuppression(detections: RawDetection[], iouThreshold: 
 
     kept.push(current);
     for (let index = sorted.length - 1; index >= 0; index -= 1) {
-      if (sorted[index].classId === current.classId && computeIou(sorted[index].bbox, current.bbox) > iouThreshold) {
+      if (computeIou(sorted[index].bbox, current.bbox) > iouThreshold) {
         sorted.splice(index, 1);
       }
     }
   }
 
   return kept;
+}
+
+export function boxArea(bbox: BoundingBox): number {
+  return Math.max(0, bbox[2] - bbox[0]) * Math.max(0, bbox[3] - bbox[1]);
+}
+
+function boxCenterY(bbox: BoundingBox): number {
+  return (bbox[1] + bbox[3]) / 2;
+}
+
+export function clusterByRow(detections: RawDetection[], gapMultiplier = 1.0): RawDetection[][] {
+  if (detections.length === 0) return [];
+
+  const sorted = [...detections].sort((a, b) => boxCenterY(a.bbox) - boxCenterY(b.bbox));
+  const heights = sorted.map((d) => d.bbox[3] - d.bbox[1]);
+  const refHeight = median(heights);
+
+  const rows: RawDetection[][] = [];
+  let currentRow: RawDetection[] = [sorted[0]];
+
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prevY = boxCenterY(currentRow[currentRow.length - 1].bbox);
+    const curY = boxCenterY(sorted[i].bbox);
+    const gap = Math.abs(curY - prevY);
+
+    if (gap > Math.max(refHeight * gapMultiplier, 1)) {
+      rows.push(currentRow);
+      currentRow = [sorted[i]];
+    } else {
+      currentRow.push(sorted[i]);
+    }
+  }
+
+  rows.push(currentRow);
+  return rows;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+export function filterSizeOutliers(detections: RawDetection[], sizeRatioThreshold = 0.5): RawDetection[] {
+  if (detections.length < 3) return detections;
+
+  const rows = clusterByRow(detections);
+  const result: RawDetection[] = [];
+
+  for (const row of rows) {
+    if (row.length < 3) {
+      result.push(...row);
+      continue;
+    }
+
+    const areas = row.map((d) => boxArea(d.bbox));
+    const med = median(areas);
+    const lowerBound = med * sizeRatioThreshold;
+
+    for (let i = 0; i < row.length; i += 1) {
+      if (areas[i] >= lowerBound) {
+        result.push(row[i]);
+      }
+    }
+  }
+
+  return result;
 }
 
 function clamp(value: number, min: number, max: number): number {
