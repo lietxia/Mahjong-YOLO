@@ -18,6 +18,16 @@ coverage/
 .vscode/
 .idea/
 
+# Playwright
+/test-results/
+/playwright-report/
+
+# Test images
+/test.jpg
+/test.png
+/*.jpg
+/*.png
+
 # Internal
 /.claude
 /.sisyphus
