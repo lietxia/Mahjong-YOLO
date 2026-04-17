@@ -70,7 +70,8 @@ async function ensureSession(nextAssets?: ModelAssets): Promise<WorkerInitResult
     throw new Error('Worker 尚未收到模型资源。');
   }
 
-  const modelUrl = new URL(`/model/${workerAssets.manifest.modelFile}`, self.location.origin).toString();
+  const modelFile = workerAssets.manifest.modelFile;
+  const modelUrl = modelFile.startsWith('http') ? modelFile : new URL(`/model/${modelFile}`, self.location.origin).toString();
 
   try {
     const webgpuOrt = await loadOrtModule('webgpu');

@@ -3,16 +3,16 @@
   "models": [
     {
       "id": "mahjong-yolon-best",
-      "label": "当前模型（mahjong-yolon-best）",
-      "modelFile": "mahjong-yolon-best.onnx",
+      "label": "Nano 模型（mahjong-yolon-best）",
+      "modelFile": "https://pub-e3b5792ae4f24700b2b0f0a495d5256b.r2.dev/mahjong-yolon-best.onnx",
       "notes": [
-        "现有默认模型。"
+        "轻量 ONNX 模型，初始化快。"
       ]
     },
     {
       "id": "mahjong-yolol-best",
       "label": "Large 模型（mahjong-yolol-best）",
-      "modelFile": "mahjong-yolol-best.onnx",
+      "modelFile": "https://pub-e3b5792ae4f24700b2b0f0a495d5256b.r2.dev/mahjong-yolol-best.onnx",
       "notes": [
         "更大的 ONNX 模型，通常精度更高但初始化更慢。"
       ]
