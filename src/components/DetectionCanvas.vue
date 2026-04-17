@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ElMessageBox } from 'element-plus';
-import { computed, h, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { RecognizedTile } from '../lib/tile';
 import { createLabelPalette, getLabelColor } from '../lib/labels';
 
@@ -87,22 +86,14 @@ async function openPreview() {
   }
 
   const previewUrl = URL.createObjectURL(previewBlob);
+  const win = window.open('', '_blank');
+  if (!win) {
+    URL.revokeObjectURL(previewUrl);
+    return;
+  }
 
-  void ElMessageBox({
-    title: '检测结果预览',
-    message: h('img', {
-      src: previewUrl,
-      alt: '检测结果预览',
-      style: 'display:block;max-width:min(88vw,1200px);max-height:75vh;width:auto;height:auto;margin:0 auto;',
-    }),
-    confirmButtonText: '关闭',
-    closeOnClickModal: true,
-    closeOnPressEscape: true,
-    beforeClose: (_action, _instance, done) => {
-      URL.revokeObjectURL(previewUrl);
-      done();
-    },
-  }).catch(() => undefined);
+  win.document.write(`<!DOCTYPE html><html><head><title>检测结果预览</title><style>*{margin:0;padding:0}body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh}img{max-width:100vw;max-height:100vh;object-fit:contain}</style></head><body><img src="${previewUrl}" alt="检测结果预览"></body></html>`);
+  win.document.close();
 }
 
 onMounted(draw);
