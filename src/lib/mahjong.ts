@@ -1,6 +1,8 @@
 import { Calculator } from '../../vendor/mahjong-vue/src/store/calc';
 import { Rule, type Result } from '../../vendor/mahjong-vue/src/store/definition';
 import {
+  Block,
+  BlockType,
   Pai,
   PositionType,
   RON,
@@ -15,6 +17,11 @@ import { countRedDora, hasUnsupportedTiles } from './tile';
 export type Wind = 'east' | 'south' | 'west' | 'north';
 export type AgariType = 'tsumo' | 'ron';
 
+export type FuroMeld = {
+  type: 'chi' | 'pon' | 'kan';
+  tiles: string[];  // e.g. ['1m','2m','3m'] for chi, ['5p','5p','5p'] for pon, ['7z','7z','7z','7z'] for kan
+};
+
 export type ScoreContext = {
   fieldWind: Wind;
   seatWind: Wind;
@@ -24,6 +31,7 @@ export type ScoreContext = {
   agariIndex: number;
   doraIndicators: string[];
   uraIndicators: string[];
+  furo: FuroMeld[];
 };
 
 export type ScoreComputation = {
@@ -82,21 +90,41 @@ function buildYakuFlags(context: ScoreContext): number[] {
   return flags;
 }
 
+function furoMeldToBlock(meld: FuroMeld): Block {
+  const firstCode = meld.tiles[0];
+  const { pai } = normalizeTileCode(firstCode);
+
+  switch (meld.type) {
+    case 'chi':
+      return new Block(BlockType.SEQ, pai.type, pai.num, true);
+    case 'pon':
+      return new Block(BlockType.TRI, pai.type, pai.num, true);
+    case 'kan':
+      return new Block(BlockType.QUAD, pai.type, pai.num, true);
+  }
+}
+
 export function calculateMahjongScore(tileLabels: string[], context: ScoreContext): ScoreComputation {
   const warnings: string[] = [];
   const normalizedTiles = tileLabels.filter(Boolean);
+  const furoTileCount = context.furo.reduce((sum, meld) => sum + meld.tiles.length, 0);
+  const kanCount = context.furo.filter((meld) => meld.type === 'kan').length;
+  const expectedTotal = 14 + kanCount;
+  const actualTotal = normalizedTiles.length + furoTileCount;
 
-  if (normalizedTiles.length !== 14) {
+  if (actualTotal !== expectedTotal) {
     return {
       status: 'incomplete',
-        message: `当前识别到 ${normalizedTiles.length} 张牌。Phase 5 只支持 14 张闭门和牌计算。`,
+      message: `当前识别到 ${normalizedTiles.length} 张手牌 + ${furoTileCount} 张副露 = ${actualTotal} 张，需要 ${expectedTotal} 张（${14 - furoTileCount + kanCount} 张手牌 + ${furoTileCount} 张副露${kanCount > 0 ? `，含 ${kanCount} 杠` : ''}）。`,
       warnings,
       normalizedTiles,
       redDoraCount: countRedDora(normalizedTiles),
     };
   }
 
-  if (hasUnsupportedTiles(normalizedTiles)) {
+  const allTiles = [...normalizedTiles, ...context.furo.flatMap((meld) => meld.tiles)];
+
+  if (hasUnsupportedTiles(allTiles)) {
     return {
       status: 'incomplete',
       message: '识别结果里存在无法映射到麻将牌编码的标签，暂时不能进入和牌计算。',
@@ -120,7 +148,8 @@ export function calculateMahjongScore(tileLabels: string[], context: ScoreContex
   const concealedCodes = normalizedTiles.filter((_, index) => index !== context.agariIndex);
   const concealedPais = concealedCodes.map((code) => normalizeTileCode(code).pai);
   const agariPai = normalizeTileCode(agariCode).pai;
-  const redDoraCount = countRedDora(normalizedTiles);
+  const redDoraCount = countRedDora(allTiles);
+  const furuBlocks = context.furo.map(furoMeldToBlock);
 
   const state = new State(
     mapWindToPosition(context.fieldWind),
@@ -128,7 +157,7 @@ export function calculateMahjongScore(tileLabels: string[], context: ScoreContex
     buildYakuFlags(context),
     context.agariType === 'tsumo' ? TSUMO : RON,
     concealedPais,
-    [],
+    furuBlocks,
     normalizeIndicatorList(context.doraIndicators),
     normalizeIndicatorList(context.uraIndicators),
     agariPai,
@@ -144,7 +173,7 @@ export function calculateMahjongScore(tileLabels: string[], context: ScoreContex
 
   return {
     status: 'ready',
-        message: warnings.length > 0 ? '已完成计算，但结果需要结合提示一起判断。' : '已完成 Phase 5 和牌计算。',
+    message: warnings.length > 0 ? '已完成计算，但结果需要结合提示一起判断。' : '已完成和牌计算。',
     warnings,
     normalizedTiles,
     redDoraCount,

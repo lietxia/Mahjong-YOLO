@@ -36,6 +36,58 @@ export function toOrderedTileLabels(tiles: RecognizedTile[]): string[] {
   return sortTilesLeftToRight(tiles).map((tile) => tile.label);
 }
 
+export function separateHandAndFuro(tiles: RecognizedTile[]): {
+  handTiles: RecognizedTile[];
+  furoGroups: RecognizedTile[][];
+} {
+  if (tiles.length <= 2) {
+    return { handTiles: [...tiles], furoGroups: [] };
+  }
+
+  const medianHeight = median(tiles.map(getTileHeight));
+  const rowTolerance = Math.max(8, medianHeight * 0.5);
+
+  const rows = clusterIntoRows(tiles, rowTolerance);
+
+  if (rows.length <= 1) {
+    const sorted = [...tiles].sort((a, b) => a.centerX - b.centerX);
+    return { handTiles: sorted, furoGroups: [] };
+  }
+
+  rows.sort((a, b) => b.length - a.length);
+
+  const handRow = rows[0];
+  const furoGroups = rows.slice(1).map((row) =>
+    [...row].sort((a, b) => a.centerX - b.centerX),
+  );
+
+  const handTiles = [...handRow].sort((a, b) => a.centerX - b.centerX);
+
+  return { handTiles, furoGroups };
+}
+
+function clusterIntoRows(tiles: RecognizedTile[], tolerance: number): RecognizedTile[][] {
+  const sorted = [...tiles].sort((a, b) => a.centerY - b.centerY);
+  const rows: RecognizedTile[][] = [];
+  let currentRow: RecognizedTile[] = [sorted[0]];
+  let rowCenter = sorted[0].centerY;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const tile = sorted[i];
+    if (Math.abs(tile.centerY - rowCenter) <= tolerance) {
+      currentRow.push(tile);
+      rowCenter = currentRow.reduce((s, t) => s + t.centerY, 0) / currentRow.length;
+    } else {
+      rows.push(currentRow);
+      currentRow = [tile];
+      rowCenter = tile.centerY;
+    }
+  }
+
+  rows.push(currentRow);
+  return rows;
+}
+
 export function countRedDora(tileLabels: string[]): number {
   return tileLabels.filter((label) => label === '0m' || label === '0p' || label === '0s').length;
 }
