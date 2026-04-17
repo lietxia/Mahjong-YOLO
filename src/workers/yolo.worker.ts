@@ -1,10 +1,6 @@
 /// <reference lib="webworker" />
 
 import type * as OrtTypes from 'onnxruntime-web';
-import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
-import ortWasmMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url';
-import ortWasmAsyncifyUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
-import ortWasmAsyncifyMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
 import type { ModelAssets } from '../lib/manifest';
 import { decodeOutput } from '../lib/postprocess';
 import { preprocessImageBitmap } from '../lib/preprocess';
@@ -32,18 +28,20 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Worker 推理失败。';
 }
 
+const WASM_CDN = 'https://pub-e3b5792ae4f24700b2b0f0a495d5256b.r2.dev';
+
 function configureOrtModule(runtime: OrtModule, targetBackend: RuntimeBackend) {
   runtime.env.wasm.proxy = false;
   runtime.env.wasm.numThreads = 1;
   runtime.env.wasm.wasmPaths =
     targetBackend === 'webgpu'
       ? {
-          wasm: ortWasmAsyncifyUrl,
-          mjs: ortWasmAsyncifyMjsUrl,
+          wasm: `${WASM_CDN}/ort-wasm-simd-threaded.asyncify.wasm`,
+          mjs: `${WASM_CDN}/ort-wasm-simd-threaded.asyncify.mjs`,
         }
       : {
-          wasm: ortWasmUrl,
-          mjs: ortWasmMjsUrl,
+          wasm: `${WASM_CDN}/ort-wasm-simd-threaded.wasm`,
+          mjs: `${WASM_CDN}/ort-wasm-simd-threaded.mjs`,
         };
 }
 
